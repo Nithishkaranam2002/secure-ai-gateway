@@ -1,0 +1,36 @@
+# Secure AI Gateway, project rules
+
+Always read docs/PROJECT_BRIEF.md before making changes. It defines what
+this project is and what each module is responsible for.
+
+## Absolute rules
+- Never use print(). All logging goes through the logger in
+  src/core/logging_setup.py, which writes to stderr only. A single stray
+  print breaks the MCP stdio transport in src/mcp_server.
+- Never hardcode API keys, tokens or secrets. Read them from
+  src/core/config.py, which loads from .env.
+- Never commit .env or anything in data/.
+
+## Style
+- Python 3.11+, type hints on every function signature.
+- Validate all external input with Pydantic v2 models using
+  model_config = ConfigDict(extra="forbid").
+- Async throughout the FastAPI services. Use httpx.AsyncClient for all
+  outbound HTTP. Do not use the openai or groq SDKs.
+- Keep logic out of route handlers. Routes parse input and delegate.
+
+## Structure
+- Shared code lives in src/core and is imported, never copied.
+- src/mcp_server is Task 1. src/mcp_gateway is Task 2.
+  src/llm_gateway is Tasks 3 and 4.
+- Test doubles live only in tests/fault_injection and are never imported
+  by anything under src/.
+
+## Errors
+- Outward facing errors are short and contain no stack traces, provider
+  names, file paths or internal details.
+- Full detail goes to the log and the audit table under a matching error id.
+
+## Testing
+- Every module gets a matching test file in tests/.
+- Never weaken a test to make it pass.
