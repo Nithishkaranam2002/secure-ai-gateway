@@ -63,6 +63,21 @@ def _rpc(payload: dict[str, Any], status_code: int = 200) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 
 
+@app.get("/")
+async def root() -> dict[str, Any]:
+    """A landing response, so someone opening the base URL is not met with a
+    bare not found."""
+    return {
+        "service": "MCP Security Gateway",
+        "version": "1.0.0",
+        "endpoints": {
+            "POST /mcp": "Authenticated MCP JSON-RPC proxy",
+            "GET /health": "Liveness and downstream status",
+            "GET /docs": "Interactive API documentation",
+        },
+    }
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
