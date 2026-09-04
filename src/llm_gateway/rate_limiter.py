@@ -32,6 +32,15 @@ EVICTION_GRACE_SECONDS = 60.0
 # would mean a delete statement for every call forever.
 EVICTION_INTERVAL_SECONDS = 10.0
 
+# Minimum charge per request.
+#
+# Settling to the provider's true count is correct, but on its own it leaves the
+# limit unenforceable: a caller can request max_tokens=900, receive a 20 token
+# answer, and repeat indefinitely, because each settled charge is negligible. A
+# floor means a burst of small requests still consumes budget, which is what the
+# limit exists to control.
+MINIMUM_CHARGE_TOKENS = 100
+
 _last_eviction = 0.0
 
 
@@ -196,14 +205,18 @@ def check_and_reserve(
 
 
 def settle(reservation_id: str | None, actual_tokens: int) -> None:
-    """Correct a reservation to the true cost once the provider reports it."""
+    """Correct a reservation to the true cost once the provider reports it.
+
+    Charged at no less than the floor, so many cheap requests still add up.
+    """
     if reservation_id is None:
         return
+    charge = max(actual_tokens, MINIMUM_CHARGE_TOKENS)
     try:
         with get_connection() as connection:
             connection.execute(
                 "UPDATE token_usage SET tokens = ? WHERE id = ?",
-                (actual_tokens, int(reservation_id)),
+                (charge, int(reservation_id)),
             )
     except Exception:
         logger.exception("could not settle reservation %s", reservation_id)
@@ -236,7 +249,7 @@ def estimate_tokens(request: dict) -> int:
     )
     prompt_estimate = max(1, characters // 4)
     completion_estimate = int(request.get("max_tokens") or 512)
-    return prompt_estimate + completion_estimate
+    return max(MINIMUM_CHARGE_TOKENS, prompt_estimate + completion_estimate)
 
 
 def reset_eviction_timer() -> None:
