@@ -1,0 +1,209 @@
+"""MCP security gateway.
+
+An HTTP JSON-RPC reverse proxy in front of the stdio MCP server. Every request
+is authenticated, evaluated against the policy, and only then forwarded. A
+request the policy refuses never reaches the downstream server at all, which is
+the point: by the time a privileged tool has executed, blocking it is too late.
+"""
+
+import json
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+
+from src.core.audit import record
+from src.core.database import initialise_database
+from src.core.errors import (
+    INTERNAL_ERROR,
+    INVALID_REQUEST,
+    PARSE_ERROR,
+    UNAUTHENTICATED,
+    jsonrpc_error,
+)
+from src.core.logging_setup import get_logger
+from src.mcp_gateway.auth import AuthError, Principal, authenticate
+from src.mcp_gateway.policy import evaluate
+from src.mcp_gateway.stdio_bridge import BridgeError, bridge
+
+logger = get_logger(__name__)
+
+COMPONENT = "mcp_gateway"
+
+# The bridge performs the handshake once on behalf of every client, so a client
+# sending its own initialize is answered from the stored result rather than
+# re-initialising the shared downstream session.
+LOCALLY_ANSWERED = frozenset({"initialize"})
+SWALLOWED_NOTIFICATIONS = frozenset({"notifications/initialized"})
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialise_database()
+    try:
+        await bridge.ensure_started()
+    except Exception:
+        # A downstream that is not up yet must not stop the gateway from
+        # starting. The next request retries it and reports the failure.
+        logger.exception("downstream MCP server did not start at boot")
+    yield
+    await bridge.stop()
+
+
+app = FastAPI(
+    title="MCP Security Gateway",
+    description="Authenticated, policy filtered proxy in front of an MCP server.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+
+def _rpc(payload: dict[str, Any], status_code: int = 200) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/health")
+async def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "downstream_running": bridge.is_running(),
+        "downstream_initialised": bridge.initialize_result is not None,
+    }
+
+
+@app.post("/mcp")
+async def handle_mcp(request: Request) -> Response:
+    raw = await request.body()
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("request body was not valid JSON")
+        return _rpc(jsonrpc_error(None, PARSE_ERROR, "Parse error"))
+
+    if isinstance(payload, list):
+        # The current MCP revision removed JSON-RPC batching. Refusing is safer
+        # than partially authorising a batch.
+        return _rpc(
+            jsonrpc_error(None, INVALID_REQUEST, "Batch requests are not supported")
+        )
+
+    if not isinstance(payload, dict):
+        return _rpc(jsonrpc_error(None, INVALID_REQUEST, "Invalid Request"))
+
+    request_id = payload.get("id")
+    is_notification = "id" not in payload
+    method = payload.get("method")
+    params = payload.get("params")
+
+    if not isinstance(method, str) or not method:
+        return _rpc(jsonrpc_error(request_id, INVALID_REQUEST, "Invalid Request"))
+
+    if params is not None and not isinstance(params, dict):
+        return _rpc(jsonrpc_error(request_id, INVALID_REQUEST, "Invalid Request"))
+
+    # ------------------------------------------------------------ authenticate
+    try:
+        principal: Principal = authenticate(request.headers.get("authorization"))
+    except AuthError as exc:
+        record(
+            COMPONENT,
+            method,
+            "unauthenticated",
+            actor=None,
+            detail={"reason": exc.reason},
+        )
+        if is_notification:
+            return Response(status_code=401)
+        return _rpc(
+            jsonrpc_error(request_id, UNAUTHENTICATED, exc.public_message),
+            status_code=401,
+        )
+
+    actor = f"{principal.subject}:{principal.role}"
+
+    # ---------------------------------------------------------------- authorise
+    decision = evaluate(method, params, principal)
+
+    if not decision.allowed:
+        record(
+            COMPONENT,
+            method,
+            "blocked",
+            actor=actor,
+            detail={"tool": decision.tool_name, "reason": decision.reason},
+        )
+        logger.warning("blocked %s for %s: %s", method, actor, decision.reason)
+        if is_notification:
+            return Response(status_code=204)
+        # Deliberately 200. The brief asks for a JSON-RPC error, and MCP clients
+        # read the body. The refusal is in the payload, not the status line.
+        return _rpc(
+            jsonrpc_error(
+                request_id,
+                decision.error_code or INVALID_REQUEST,
+                decision.error_message or "Request refused",
+            )
+        )
+
+    record(
+        COMPONENT,
+        method,
+        "allowed",
+        actor=actor,
+        detail={"tool": decision.tool_name} if decision.tool_name else None,
+    )
+
+    # ------------------------------------------------------------------ forward
+    if is_notification:
+        if method in SWALLOWED_NOTIFICATIONS:
+            # The shared session is already initialised. Forwarding a second
+            # initialized notification would confuse the downstream server.
+            return Response(status_code=202)
+        try:
+            await bridge.forward_notification(method, params)
+        except BridgeError as exc:
+            logger.error("could not forward notification %s: %s", method, exc)
+        return Response(status_code=202)
+
+    if method in LOCALLY_ANSWERED:
+        try:
+            await bridge.ensure_started()
+        except Exception as exc:
+            return _handle_bridge_failure(request_id, method, actor, exc)
+        return _rpc(
+            {"jsonrpc": "2.0", "id": request_id, "result": bridge.initialize_result}
+        )
+
+    try:
+        response = await bridge.forward_request(request_id, method, params)
+    except BridgeError as exc:
+        return _handle_bridge_failure(request_id, method, actor, exc)
+    except Exception as exc:  # pragma: no cover
+        return _handle_bridge_failure(request_id, method, actor, exc)
+
+    return _rpc(response)
+
+
+def _handle_bridge_failure(
+    request_id: Any, method: str, actor: str | None, exc: Exception
+) -> JSONResponse:
+    """One flat message outward, the real cause in the log and audit trail."""
+    event_id = record(
+        COMPONENT,
+        method,
+        "upstream_failure",
+        actor=actor,
+        detail={"error": f"{type(exc).__name__}: {exc}"},
+    )
+    logger.error("downstream failure on %s: %s", method, exc)
+    return _rpc(
+        jsonrpc_error(
+            request_id,
+            INTERNAL_ERROR,
+            "The downstream server could not be reached.",
+            data={"error_id": event_id},
+        ),
+        status_code=502,
+    )

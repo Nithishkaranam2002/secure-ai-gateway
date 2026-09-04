@@ -8,7 +8,8 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
-# Application defined code, reserved range -32000 to -32099
+# Application defined codes, reserved range -32000 to -32099
+UNAUTHENTICATED = -32000
 UNAUTHORIZED_TOOL_CALL = -32001
 
 
