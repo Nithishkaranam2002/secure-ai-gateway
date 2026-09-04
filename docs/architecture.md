@@ -4,8 +4,7 @@
 
 The system has two entry points that share everything underneath.
 
-
-                ┌─────────────────────────────┐
+              ┌─────────────────────────────┐
 AI agent ─────────▶│ MCP gateway :8000 │
 │ authenticate │
 │ evaluate policy │──▶ MCP server
@@ -22,6 +21,7 @@ application ──────▶│ LLM gateway :8001 │ ┌──────
 │ └──────────────┘
 ▼
 OpenAI ──failover──▶ Groq
+
 
 ## The MCP request path
 

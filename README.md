@@ -5,10 +5,9 @@ to call, strips private data out of model responses while they are still
 streaming, meters usage per tenant, and keeps serving when a model provider
 fails.
 
-Built for the Forward Deployed Engineer assessment. Four tasks, one system:
-the MCP gateway proxies to the MCP server, and the LLM gateway runs every
-response through the rate limiter, the router and the redactor in a single
-request path.
+Built for the Forward Deployed Engineer assessment. Four tasks, one system: the
+MCP gateway proxies to the MCP server, and the LLM gateway runs every response
+through the rate limiter, the router and the redactor in a single request path.
 
 ## Where each task lives
 
@@ -35,8 +34,13 @@ cp .env.example .env
 
 ```bash
 docker compose up --build -d
+docker compose ps          # both services should show as running
 ./scripts/demo.sh
 ```
+
+If a service fails to start, the usual cause is a port already in use.
+`docker compose ps` will show which one did not come up; stop whatever is
+holding 8000 or 8001 and run the command again.
 
 ### Without Docker
 
@@ -157,7 +161,6 @@ redact
 ▼
 SQLite on disk
 customers, usage, audit log
-
 
 
 
