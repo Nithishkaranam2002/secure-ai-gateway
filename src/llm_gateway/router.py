@@ -15,7 +15,7 @@ from typing import Any
 
 from src.core.audit import record
 from src.core.config import settings
-from src.core.errors import GatewayError
+from src.core.errors import GatewayError, sanitise
 from src.core.logging_setup import get_logger
 from src.llm_gateway.providers import (
     Provider,
@@ -115,6 +115,27 @@ class ModelRouter:
                     internal_detail=f"primary={exc!r} backup={backup_exc!r}",
                 ) from backup_exc
 
+        except GatewayError:
+            raise
+
+        except Exception as exc:
+            # Anything not anticipated above. Sanitising only the failures we
+            # predicted is not enough: an unexpected exception carries text this
+            # project never wrote and never reviewed, which is exactly how a key
+            # or a file path ends up in a response. The catch has to be total and
+            # it has to be here, at the boundary.
+            error = sanitise(exc)
+            record(
+                COMPONENT,
+                "complete",
+                "internal_error",
+                actor=actor,
+                detail={"error_id": error.error_id, "type": type(exc).__name__},
+                event_id=error.error_id,
+            )
+            logger.exception("unexpected routing failure error_id=%s", error.error_id)
+            raise error from exc
+
     async def _call_with_deadline(
         self, provider: Provider, request: dict[str, Any]
     ) -> dict[str, Any]:
@@ -205,6 +226,22 @@ class ModelRouter:
                     message="No model provider is currently available.",
                     internal_detail=f"primary={exc!r} backup={backup_exc!r}",
                 ) from backup_exc
+
+        except GatewayError:
+            raise
+
+        except Exception as exc:
+            error = sanitise(exc)
+            record(
+                COMPONENT,
+                "stream",
+                "internal_error",
+                actor=actor,
+                detail={"error_id": error.error_id, "type": type(exc).__name__},
+                event_id=error.error_id,
+            )
+            logger.exception("unexpected stream routing failure error_id=%s", error.error_id)
+            raise error from exc
 
     async def _open_stream(
         self, provider: Provider, request: dict[str, Any]
