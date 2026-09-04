@@ -85,3 +85,54 @@ line parses as JSON and carries `jsonrpc: "2.0"`. The child is forced to
 `LOG_LEVEL=INFO` so it produces as much log output as possible during the test.
 A stray `print` anywhere in the process, including inside a dependency, fails
 this test.
+
+## Task 3 and 4: providers
+
+### httpx rather than the provider SDKs
+
+`src/llm_gateway/providers.py` is the only module that makes outbound calls,
+and it uses httpx directly. The SDKs were rejected for three specific reasons.
+They retry a 429 internally, which hides the signal the router needs in order to
+fail over, so the failover path would silently never run. They apply timeouts
+per attempt rather than per call, so a 3000 ms budget can take far longer than
+3000 ms. And they parse the SSE stream into their own objects, which this
+gateway would then have to rebuild in order to forward it on intact.
+
+Because Groq accepts the OpenAI request shape, one `Provider` class serves both
+with a different base URL, key and model.
+
+### The timeout bounds silence, not total duration
+
+httpx is given a 3000 ms connect, read, write and pool timeout, and no overall
+timeout. This is deliberate. A healthy streaming response legitimately stays
+open for far longer than the budget, so an overall cap would truncate long
+answers mid sentence on every request. What the brief is protecting against is a
+provider that has stopped responding, which is a gap between chunks, which is
+the read timeout.
+
+### The backup provider does not behave like the primary
+
+Two things surfaced only because both providers are real.
+
+Groq retires model names often. `llama-3.1-8b-instant` was gone by the time this
+was built. The README explains how to list the models a given key can actually
+serve rather than hardcoding an assumption.
+
+More interestingly, `openai/gpt-oss-20b` is a reasoning model. It spends output
+tokens on internal reasoning before writing anything, so a request with a small
+`max_tokens` returns HTTP 200, reports `completion_tokens` spent, and leaves
+`message.content` empty. A failover to that model would have produced a
+successful looking response containing no text.
+
+`qwen/qwen3.6-27b` failed the same way for a different reason. Groq accepts a
+`reasoning_format` parameter, and both `hidden` and `parsed` correctly kept the
+thinking out of `content`, but the model still exhausted a 200 token budget
+before writing an answer. Left at its default it returned its raw reasoning
+inside `content` instead.
+
+The backup is therefore `allam-2-7b`, a plain chat model with no reasoning step.
+The wider point is that a gateway cannot assume its providers are
+interchangeable just because they share a wire format. Three backup candidates
+were tried. One had been retired, one returned HTTP 200 with an empty body, and
+one returned its internal reasoning as the answer. All three accepted an
+identical request and reported success.
