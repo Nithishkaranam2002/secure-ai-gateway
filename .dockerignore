@@ -9,4 +9,5 @@ data/
 tests/
 docs/
 *.md
+!config/
 .env

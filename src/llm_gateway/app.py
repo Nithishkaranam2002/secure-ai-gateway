@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from src.core.audit import record
 from src.core.database import initialise_database
 from src.core.errors import GatewayError, sanitise
+from src.console.api import router as console_router
 from src.core.logging_setup import get_logger
 from src.core.request_context import (
     HEADER_NAME,
@@ -53,6 +54,9 @@ app = FastAPI(
 )
 
 
+app.include_router(console_router)
+
+
 def _error_response(error: GatewayError) -> JSONResponse:
     response = JSONResponse(status_code=error.status_code, content=error.public_payload())
     correlation_id = get_correlation_id()
@@ -77,12 +81,15 @@ async def root() -> dict[str, Any]:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    from src.core.policy_config import policy as active_policy
+
     breaker = router.primary_breaker.status()
     return {
         "status": "ok",
         "primary": router.primary.config.model,
         "backup": router.backup.config.model,
         "timeout_ms": int(router.timeout_seconds * 1000),
+        "policy_source": active_policy.source,
         "primary_circuit": {
             "state": breaker.state.value,
             "consecutive_failures": breaker.consecutive_failures,

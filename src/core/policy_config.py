@@ -154,13 +154,24 @@ def load_policy(path: Path | None = None) -> Policy:
         source=source,
     )
 
-    logger.info(
-        "policy loaded from %s: %d roles, %d privileged prefixes, %d overrides",
-        policy.source,
-        len(policy.roles),
-        len(policy.privileged_prefixes),
-        len(policy.overrides),
-    )
+    if policy.source.startswith("defaults"):
+        # Falling back is safe but it must never be quiet. A deployment running
+        # on built in defaults while an operator believes their configuration is
+        # in force is worse than one that never had a file.
+        logger.warning(
+            "POLICY FALLBACK: running on built in defaults (%s). "
+            "The file at %s was not loaded.",
+            policy.source,
+            target,
+        )
+    else:
+        logger.info(
+            "policy loaded from %s: %d roles, %d privileged prefixes, %d overrides",
+            policy.source,
+            len(policy.roles),
+            len(policy.privileged_prefixes),
+            len(policy.overrides),
+        )
     return policy
 
 
