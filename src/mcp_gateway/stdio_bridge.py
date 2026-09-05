@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from src.core.logging_setup import get_logger
+from src.core.request_context import get_correlation_id
 
 try:
     from mcp.types import LATEST_PROTOCOL_VERSION as PROTOCOL_VERSION
@@ -232,6 +233,17 @@ class MCPStdioBridge:
         }
         if params is not None:
             message["params"] = params
+
+        # A ContextVar cannot cross a process boundary, so the correlation id
+        # travels in the message itself. MCP reserves params._meta for exactly
+        # this kind of out of band data.
+        correlation_id = get_correlation_id()
+        if correlation_id:
+            outgoing = dict(message.get("params") or {})
+            meta = dict(outgoing.get("_meta") or {})
+            meta["correlationId"] = correlation_id
+            outgoing["_meta"] = meta
+            message["params"] = outgoing
 
         try:
             await self._write(message)

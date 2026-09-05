@@ -5,6 +5,7 @@ from typing import Any
 from src.core.database import get_connection
 from src.core.errors import new_error_id
 from src.core.logging_setup import get_logger
+from src.core.request_context import get_correlation_id
 
 logger = get_logger(__name__)
 
@@ -24,7 +25,14 @@ def record(
     """
     event_id = event_id or new_error_id()
     occurred_at = datetime.now(timezone.utc).isoformat()
-    serialised = json.dumps(detail, default=str) if detail else None
+
+    # The correlation id rides in the detail column rather than in a new column,
+    # so existing rows stay readable and no migration is needed.
+    correlation_id = get_correlation_id()
+    payload = dict(detail) if detail else {}
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    serialised = json.dumps(payload, default=str) if payload else None
 
     try:
         with get_connection() as connection:
@@ -39,11 +47,12 @@ def record(
         logger.error("audit write failed event_id=%s error=%s", event_id, exc)
 
     logger.info(
-        "audit component=%s action=%s decision=%s actor=%s event_id=%s",
+        "audit component=%s action=%s decision=%s actor=%s event_id=%s corr=%s",
         component,
         action,
         decision,
         actor,
         event_id,
+        correlation_id or "-",
     )
     return event_id

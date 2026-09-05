@@ -36,6 +36,7 @@ from pydantic import BaseModel, ValidationError
 
 from src.core.database import initialise_database
 from src.core.logging_setup import get_logger
+from src.core.request_context import set_correlation_id
 from src.mcp_server import tools
 from src.mcp_server.schemas import (
     GetCustomerRecordInput,
@@ -109,6 +110,17 @@ async def on_call_tool(
 ) -> CallToolResult:
     name = params.name
     arguments = params.arguments or {}
+
+    # The gateway puts the correlation id in _meta because a ContextVar does not
+    # survive the pipe. Picking it up here is what lets one trace cover the
+    # gateway's decision and this server's execution of the same request.
+    meta = getattr(params, "meta", None)
+    inbound_correlation = None
+    if meta is not None:
+        inbound_correlation = getattr(meta, "correlationId", None)
+        if inbound_correlation is None and isinstance(meta, dict):
+            inbound_correlation = meta.get("correlationId")
+    set_correlation_id(inbound_correlation)
 
     schema = TOOL_SCHEMAS.get(name)
     if schema is None:

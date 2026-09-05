@@ -19,6 +19,11 @@ from src.core.audit import record
 from src.core.database import initialise_database
 from src.core.errors import GatewayError, sanitise
 from src.core.logging_setup import get_logger
+from src.core.request_context import (
+    HEADER_NAME,
+    get_correlation_id,
+    set_correlation_id,
+)
 from src.llm_gateway import rate_limiter
 from src.llm_gateway.router import ModelRouter
 from src.llm_gateway.stream_handler import redacted_stream
@@ -49,7 +54,11 @@ app = FastAPI(
 
 
 def _error_response(error: GatewayError) -> JSONResponse:
-    return JSONResponse(status_code=error.status_code, content=error.public_payload())
+    response = JSONResponse(status_code=error.status_code, content=error.public_payload())
+    correlation_id = get_correlation_id()
+    if correlation_id:
+        response.headers[HEADER_NAME] = correlation_id
+    return response
 
 
 @app.get("/")
@@ -117,6 +126,7 @@ async def usage(request: Request) -> Any:
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Any:
+    correlation_id = set_correlation_id(request.headers.get(HEADER_NAME))
     response_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
     try:
@@ -227,6 +237,7 @@ async def chat_completions(request: Request) -> Any:
                 "X-Accel-Buffering": "no",
                 "X-Gateway-Provider": provider.config.name,
                 "X-Gateway-Failed-Over": str(failed_over).lower(),
+                HEADER_NAME: correlation_id,
             },
         )
 
@@ -280,5 +291,6 @@ async def chat_completions(request: Request) -> Any:
         headers={
             "X-Gateway-Provider": result.provider_name,
             "X-Gateway-Failed-Over": str(result.failed_over).lower(),
+            HEADER_NAME: correlation_id,
         },
     )

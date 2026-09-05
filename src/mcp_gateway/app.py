@@ -23,6 +23,11 @@ from src.core.errors import (
     jsonrpc_error,
 )
 from src.core.logging_setup import get_logger
+from src.core.request_context import (
+    HEADER_NAME,
+    get_correlation_id,
+    set_correlation_id,
+)
 from src.mcp_gateway.auth import AuthError, Principal, authenticate
 from src.mcp_gateway.policy import evaluate
 from src.mcp_gateway.response_filter import redact_tool_result
@@ -61,7 +66,11 @@ app = FastAPI(
 
 
 def _rpc(payload: dict[str, Any], status_code: int = 200) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content=payload)
+    response = JSONResponse(status_code=status_code, content=payload)
+    correlation_id = get_correlation_id()
+    if correlation_id:
+        response.headers[HEADER_NAME] = correlation_id
+    return response
 
 
 @app.get("/")
@@ -90,6 +99,8 @@ async def health() -> dict[str, Any]:
 
 @app.post("/mcp")
 async def handle_mcp(request: Request) -> Response:
+    # An inbound id is honoured so a trace can span more than this service.
+    correlation_id = set_correlation_id(request.headers.get(HEADER_NAME))
     raw = await request.body()
 
     try:
