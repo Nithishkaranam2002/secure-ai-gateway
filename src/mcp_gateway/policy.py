@@ -9,21 +9,20 @@ from typing import Any
 
 from src.core.errors import INVALID_PARAMS, UNAUTHORIZED_TOOL_CALL
 from src.core.logging_setup import get_logger
+from src.core.policy_config import policy as loaded_policy
 from src.mcp_gateway.auth import Principal
 
 logger = get_logger(__name__)
 
-ADMIN_TOOL_PREFIX = "admin_"
-
-# Told to forward transparently by the brief. Discovery is not an action.
-TRANSPARENT_METHODS = frozenset(
-    {
-        "initialize",
-        "notifications/initialized",
-        "ping",
-        "tools/list",
-    }
+# Rules come from config/policy.yaml so a deployment with different tool names
+# or roles is a configuration change rather than a release.
+ADMIN_TOOL_PREFIX = (
+    loaded_policy.privileged_prefixes[0].prefix
+    if loaded_policy.privileged_prefixes
+    else "admin_"
 )
+
+TRANSPARENT_METHODS = loaded_policy.transparent_methods
 
 UNAUTHORIZED_MESSAGE = "Unauthorized Tool Call"
 
@@ -75,20 +74,14 @@ def evaluate(
             reason="tools/call without a usable tool name",
         )
 
-    if not is_admin_tool(tool_name):
-        return Decision(
-            allowed=True,
-            action="tools/call",
-            tool_name=tool_name,
-            reason="tool is not privileged",
-        )
+    rule = loaded_policy.rule_for(tool_name)
 
-    if principal.is_admin:
+    if rule.required_role == principal.role or principal.is_admin:
         return Decision(
             allowed=True,
             action="tools/call",
             tool_name=tool_name,
-            reason="admin role permits privileged tool",
+            reason=f"role {principal.role} satisfies required role {rule.required_role}",
         )
 
     # The outward message is the flat phrase from the brief and nothing more.

@@ -1,0 +1,65 @@
+# Gateway policy.
+#
+# Deployment specific rules live here rather than in code, so a customer with
+# different tool names, roles or data handling requirements is a configuration
+# change rather than a release.
+
+version: 1
+
+# Roles the gateway will accept in a token. An unrecognised role is refused
+# rather than downgraded, so a typo cannot become a silent grant.
+roles:
+  - admin
+  - viewer
+
+# Methods forwarded without an authorisation check. Discovery is not an action.
+transparent_methods:
+  - initialize
+  - notifications/initialized
+  - ping
+  - tools/list
+
+tools:
+  # Name prefixes treated as privileged, and the role each requires.
+  # Matched case insensitively after trimming, so ADMIN_RESET_KEY and
+  # " admin_reset_key" cannot slip past a check written for admin_.
+  privileged_prefixes:
+    - prefix: "admin_"
+      required_role: admin
+
+  # Tools named individually here override the prefix rules above.
+  overrides:
+    trigger_refund:
+      required_role: viewer
+      redact_result: true
+
+  # Applied to every tool unless overridden.
+  default:
+    required_role: viewer
+    redact_result: true
+
+# What is removed from anything leaving the gateway, on either path.
+redaction:
+  enabled: true
+  patterns:
+    - email
+    - ssn
+    - credit_card
+
+limits:
+  # Tenants are seeded with their own limit; this applies to any without one.
+  default_tokens_per_minute: 50000
+  window_seconds: 60
+  minimum_charge_tokens: 100
+
+providers:
+  timeout_ms: 3000
+  # Failover is a single hop. A gateway that keeps retrying under load makes an
+  # outage worse rather than better.
+  max_failover_hops: 1
+  retry_on_status:
+    - 429
+    - 500
+    - 502
+    - 503
+    - 504
