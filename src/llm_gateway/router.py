@@ -17,6 +17,7 @@ from src.core.audit import record
 from src.core.config import settings
 from src.core.errors import GatewayError, sanitise
 from src.core.logging_setup import get_logger
+from src.llm_gateway.circuit_breaker import CircuitBreaker
 from src.llm_gateway.providers import (
     Provider,
     ProviderRateLimited,
@@ -55,14 +56,32 @@ class ModelRouter:
         self.primary = primary or build_primary()
         self.backup = backup or build_backup()
         self.timeout_seconds = (timeout_ms or settings.upstream_timeout_ms) / 1000
+        # Tracked for the primary only. The backup is the last resort, so it is
+        # always attempted: skipping it would mean failing a request that might
+        # still have succeeded.
+        self.primary_breaker = CircuitBreaker("primary")
 
     # ------------------------------------------------------------ non streaming
 
     async def complete(
         self, request: dict[str, Any], actor: str | None = None
     ) -> RouteResult:
+        if not self.primary_breaker.allows_request():
+            # The primary is known to be down, so skip the timeout entirely
+            # rather than paying it again for every request during an outage.
+            record(
+                COMPONENT,
+                "complete",
+                "circuit_open",
+                actor=actor,
+                detail={"provider": "primary"},
+            )
+            body = await self._call_with_deadline(self.backup, request)
+            return self._result(body, self.backup, failed_over=True)
+
         try:
             body = await self._call_with_deadline(self.primary, request)
+            self.primary_breaker.record_success()
             return self._result(body, self.primary, failed_over=False)
 
         except ProviderRequestRejected as exc:
@@ -84,13 +103,17 @@ class ModelRouter:
 
         except FAILOVER_ON as exc:
             reason = type(exc).__name__
+            self.primary_breaker.record_failure()
             logger.warning("primary failed with %s, failing over", reason)
             record(
                 COMPONENT,
                 "complete",
                 "failover",
                 actor=actor,
-                detail={"reason": reason},
+                detail={
+                    "reason": reason,
+                    "circuit": self.primary_breaker.status().state.value,
+                },
             )
             try:
                 body = await self._call_with_deadline(self.backup, request)
@@ -177,8 +200,20 @@ class ModelRouter:
         different answers together, so a mid stream failure is reported rather
         than retried.
         """
+        if not self.primary_breaker.allows_request():
+            record(
+                COMPONENT,
+                "stream",
+                "circuit_open",
+                actor=actor,
+                detail={"provider": "primary"},
+            )
+            iterator = await self._open_stream(self.backup, request)
+            return self.backup, iterator, True
+
         try:
             iterator = await self._open_stream(self.primary, request)
+            self.primary_breaker.record_success()
             return self.primary, iterator, False
 
         except ProviderRequestRejected as exc:
@@ -198,13 +233,17 @@ class ModelRouter:
 
         except FAILOVER_ON as exc:
             reason = type(exc).__name__
+            self.primary_breaker.record_failure()
             logger.warning("primary stream failed with %s, failing over", reason)
             record(
                 COMPONENT,
                 "stream",
                 "failover",
                 actor=actor,
-                detail={"reason": reason},
+                detail={
+                    "reason": reason,
+                    "circuit": self.primary_breaker.status().state.value,
+                },
             )
             try:
                 iterator = await self._open_stream(self.backup, request)

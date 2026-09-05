@@ -77,11 +77,17 @@ async def root() -> dict[str, Any]:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    breaker = router.primary_breaker.status()
     return {
         "status": "ok",
         "primary": router.primary.config.model,
         "backup": router.backup.config.model,
         "timeout_ms": int(router.timeout_seconds * 1000),
+        "primary_circuit": {
+            "state": breaker.state.value,
+            "consecutive_failures": breaker.consecutive_failures,
+            "seconds_until_retry": breaker.seconds_until_retry,
+        },
     }
 
 
