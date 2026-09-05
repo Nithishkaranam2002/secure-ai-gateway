@@ -12,6 +12,9 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 
+# The console is a single static file served by the LLM gateway, so it ships
+# inside the image rather than being deployed separately.
+
 # The database lives on a mounted volume so token usage and the audit log
 # survive a container restart, which is the point of using on disk SQLite
 # rather than an in memory counter.

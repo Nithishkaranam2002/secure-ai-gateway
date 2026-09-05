@@ -7,33 +7,35 @@ directly. A guardrail that covers one route out and not the other is not a
 guardrail.
 
 The same engine serves both paths, which is why it lives in src/core rather
-than under either gateway.
+than under either gateway. Counts are reported by type rather than as a single
+total, so the audit trail says the same thing whichever route a value left by.
 """
 
 from typing import Any
 
 from src.core.logging_setup import get_logger
-from src.core.redaction import redact_text
+from src.core.redaction import RedactionCounts, redact_text
 
 logger = get_logger(__name__)
 
 
-def redact_tool_result(response: dict[str, Any]) -> tuple[dict[str, Any], int]:
+def redact_tool_result(response: dict[str, Any]) -> tuple[dict[str, Any], RedactionCounts]:
     """Clean the text blocks of a tools/call result.
 
-    Returns the response and how many values were removed. The response is
-    rebuilt rather than mutated, so a caller holding the original is unaffected.
-    Anything that is not a text block is passed through untouched.
+    Returns the response and a per type count. The response is rebuilt rather
+    than mutated, so a caller holding the original is unaffected. Anything that
+    is not a text block is passed through untouched.
     """
+    totals = RedactionCounts()
+
     result = response.get("result")
     if not isinstance(result, dict):
-        return response, 0
+        return response, totals
 
     content = result.get("content")
     if not isinstance(content, list):
-        return response, 0
+        return response, totals
 
-    removed = 0
     cleaned_blocks: list[Any] = []
 
     for block in content:
@@ -43,12 +45,14 @@ def redact_tool_result(response: dict[str, Any]) -> tuple[dict[str, Any], int]:
             and isinstance(block.get("text"), str)
         ):
             cleaned, counts = redact_text(block["text"])
-            removed += counts.total
+            totals.email += counts.email
+            totals.ssn += counts.ssn
+            totals.credit_card += counts.credit_card
             cleaned_blocks.append({**block, "text": cleaned})
         else:
             cleaned_blocks.append(block)
 
-    if removed == 0:
-        return response, 0
+    if totals.total == 0:
+        return response, totals
 
-    return {**response, "result": {**result, "content": cleaned_blocks}}, removed
+    return {**response, "result": {**result, "content": cleaned_blocks}}, totals

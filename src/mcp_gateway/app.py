@@ -214,14 +214,16 @@ async def handle_mcp(request: Request) -> Response:
     # guardrail a model response does. A customer record read through a tool is
     # exactly as sensitive as one repeated by a model.
     if method == "tools/call":
-        response, removed = redact_tool_result(response)
-        if removed:
+        response, counts = redact_tool_result(response)
+        if counts.total:
+            # Recorded by type, matching what the streaming path reports, so the
+            # audit trail reads the same whichever route a value left by.
             record(
                 COMPONENT,
                 "tools/call",
                 "redacted",
                 actor=actor,
-                detail={"tool": decision.tool_name, "redactions": removed},
+                detail={"tool": decision.tool_name, **counts.as_dict()},
             )
 
     return _rpc(response)

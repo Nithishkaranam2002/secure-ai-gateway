@@ -251,3 +251,108 @@ class TestHealth:
         body = client.get("/health").json()
         assert body["status"] == "ok"
         assert body["downstream_running"] is True
+
+
+class TestToolResultRedaction:
+    """The app's use of the response filter, not the filter itself.
+
+    The filter has its own tests, but nothing covered this call site, so a
+    change to the filter's return type went unnoticed here: the old code kept
+    truthiness testing an object that is always truthy and wrote it straight
+    into the audit detail.
+    """
+
+    async def test_pii_in_a_tool_result_is_removed_by_the_gateway(
+        self, monkeypatch: pytest.MonkeyPatch, stub: RecordingBridge
+    ) -> None:
+        async def forward(client_id, method, params):
+            return {
+                "jsonrpc": "2.0",
+                "id": client_id,
+                "result": {
+                    "content": [
+                        {"type": "text", "text": '{"email": "a@b.com"}'}
+                    ],
+                    "isError": False,
+                },
+            }
+
+        monkeypatch.setattr(stub, "forward_request", forward)
+        from src.mcp_gateway.app import app
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/mcp", headers=viewer_headers(), json=call("get_customer_record", 1)
+            )
+
+        assert "a@b.com" not in response.text
+        assert "REDACTED" in response.text
+
+    async def test_the_audit_detail_records_counts_by_type(
+        self, monkeypatch: pytest.MonkeyPatch, stub: RecordingBridge
+    ) -> None:
+        """Guards the exact failure that occurred.
+
+        The detail must carry integer counts per type, not a repr of whatever
+        object the filter happened to return.
+        """
+        recorded: list[dict] = []
+
+        def capture(component, action, decision, actor=None, detail=None, event_id=None):
+            recorded.append(
+                {"decision": decision, "detail": detail or {}}
+            )
+            return "test-event"
+
+        async def forward(client_id, method, params):
+            return {
+                "jsonrpc": "2.0",
+                "id": client_id,
+                "result": {
+                    "content": [{"type": "text", "text": "mail a@b.com"}],
+                    "isError": False,
+                },
+            }
+
+        monkeypatch.setattr(stub, "forward_request", forward)
+        monkeypatch.setattr("src.mcp_gateway.app.record", capture)
+        from src.mcp_gateway.app import app
+
+        with TestClient(app) as client:
+            client.post("/mcp", headers=viewer_headers(), json=call("x", 1))
+
+        redaction_rows = [r for r in recorded if r["decision"] == "redacted"]
+        assert redaction_rows, "no redaction was recorded"
+        detail = redaction_rows[0]["detail"]
+        assert detail.get("email") == 1
+        assert isinstance(detail.get("total"), int)
+
+    async def test_a_clean_result_records_no_redaction(
+        self, monkeypatch: pytest.MonkeyPatch, stub: RecordingBridge
+    ) -> None:
+        """The old code's `if removed:` was always true, so every call logged a
+        redaction whether or not anything was removed."""
+        recorded: list[str] = []
+
+        def capture(component, action, decision, actor=None, detail=None, event_id=None):
+            recorded.append(decision)
+            return "test-event"
+
+        async def forward(client_id, method, params):
+            return {
+                "jsonrpc": "2.0",
+                "id": client_id,
+                "result": {
+                    "content": [{"type": "text", "text": "nothing sensitive here"}],
+                    "isError": False,
+                },
+            }
+
+        monkeypatch.setattr(stub, "forward_request", forward)
+        monkeypatch.setattr("src.mcp_gateway.app.record", capture)
+        from src.mcp_gateway.app import app
+
+        with TestClient(app) as client:
+            client.post("/mcp", headers=viewer_headers(), json=call("x", 1))
+
+        assert "redacted" not in recorded

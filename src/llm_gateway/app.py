@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from src.core.audit import record
 from src.core.database import initialise_database
 from src.core.errors import GatewayError, sanitise
+from src.console.api import page_router as console_page_router
 from src.console.api import router as console_router
 from src.core.logging_setup import get_logger
 from src.core.request_context import (
@@ -55,6 +56,7 @@ app = FastAPI(
 
 
 app.include_router(console_router)
+app.include_router(console_page_router)
 
 
 def _error_response(error: GatewayError) -> JSONResponse:

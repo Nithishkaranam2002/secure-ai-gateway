@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secure AI Gateway — Console</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121822;
+    --border: #1e2836;
+    --text: #d7dee8;
+    --muted: #7b8794;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .health { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); margin-right: 5px; }
+  .dot.ok { background: var(--green); }
+  .dot.bad { background: var(--red); }
+
+  main { display: grid; grid-template-columns: 280px 1fr 260px; gap: 1px; background: var(--border); min-height: calc(100vh - 53px); }
+  section { background: var(--bg); padding: 16px; overflow-y: auto; max-height: calc(100vh - 53px); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  h2:not(:first-child) { margin-top: 24px; }
+
+  button {
+    display: block; width: 100%; text-align: left; margin-bottom: 6px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    padding: 9px 11px; border-radius: 5px; cursor: pointer;
+    font: inherit; transition: border-color .12s, background .12s;
+  }
+  button:hover:not(:disabled) { border-color: var(--blue); background: #16202e; }
+  button:disabled { opacity: .45; cursor: wait; }
+  button .label { display: block; }
+  button .hint { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  button.danger:hover:not(:disabled) { border-color: var(--red); }
+
+  .feed { display: flex; flex-direction: column; gap: 4px; }
+  .event {
+    background: var(--panel); border: 1px solid var(--border); border-left-width: 3px;
+    border-radius: 4px; padding: 8px 11px;
+    animation: slide .25s ease-out;
+  }
+  @keyframes slide { from { opacity: 0; transform: translateY(-6px); } }
+  .event.blocked, .event.unauthenticated { border-left-color: var(--red); }
+  .event.redacted { border-left-color: var(--purple); }
+  .event.rate_limited, .event.failover, .event.circuit_open { border-left-color: var(--amber); }
+  .event.allowed, .event.clean { border-left-color: var(--green); }
+  .event.not_found, .event.upstream_failure, .event.both_failed { border-left-color: var(--muted); }
+  .event .top { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .event .decision { font-weight: 600; }
+  .event.blocked .decision, .event.unauthenticated .decision { color: var(--red); }
+  .event.redacted .decision { color: var(--purple); }
+  .event.rate_limited .decision, .event.failover .decision, .event.circuit_open .decision { color: var(--amber); }
+  .event.allowed .decision, .event.clean .decision { color: var(--green); }
+  .event .action { color: var(--text); }
+  .event .component { color: var(--muted); font-size: 11px; }
+  .event .time { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .event .meta { color: var(--muted); font-size: 11px; margin-top: 3px; word-break: break-all; }
+
+  .stat { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .stat:last-child { border-bottom: 0; }
+  .stat .k { color: var(--muted); }
+  .stat .v { font-weight: 600; }
+  .v.red { color: var(--red); } .v.purple { color: var(--purple); }
+  .v.amber { color: var(--amber); } .v.green { color: var(--green); }
+
+  .bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--blue); transition: width .3s; }
+  .bar > div.high { background: var(--red); }
+
+  .result {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+    padding: 12px; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word;
+    font-size: 12px;
+  }
+  .result .verdict { font-weight: 600; margin-bottom: 8px; }
+  .result.blocked { border-color: var(--red); }
+  .result.blocked .verdict { color: var(--red); }
+  .result.allowed { border-color: var(--green); }
+  .result.allowed .verdict { color: var(--green); }
+  .result .quote { color: var(--muted); border-left: 2px solid var(--border); padding-left: 10px; margin: 8px 0; }
+  .empty { color: var(--muted); padding: 20px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Secure AI Gateway</h1>
+  <span class="sub">operations console</span>
+  <span class="health">
+    <span id="mcpDot" class="dot"></span>mcp
+    <span id="llmDot" class="dot" style="margin-left:12px"></span>llm
+    <span id="policySrc" style="margin-left:12px"></span>
+  </span>
+</header>
+
+<main>
+  <section>
+    <h2>Attack simulation</h2>
+    <button class="danger" onclick="scenario('injection', this)">
+      <span class="label">Prompt injection</span>
+      <span class="hint">a real model, told to call admin_reset_key</span>
+    </button>
+    <button onclick="scenario('benign', this)">
+      <span class="label">Normal request</span>
+      <span class="hint">a genuine customer lookup</span>
+    </button>
+
+    <h2>Access control</h2>
+    <button onclick="mcp('viewer','admin_reset_key',{},this)">
+      <span class="label">Viewer calls admin tool</span>
+      <span class="hint">expect -32001</span>
+    </button>
+    <button onclick="mcp('admin','admin_reset_key',{},this)">
+      <span class="label">Admin calls admin tool</span>
+      <span class="hint">forwarded downstream</span>
+    </button>
+    <button onclick="mcp('viewer','get_customer_record',{customer_id:'CUST-10001'},this)">
+      <span class="label">Read a customer record</span>
+      <span class="hint">email redacted on the way out</span>
+    </button>
+    <button onclick="mcp('viewer','trigger_refund',{customer_id:'CUST-10001',amount:-50,reason:'a negative refund'},this)">
+      <span class="label">Malformed refund</span>
+      <span class="hint">expect -32602</span>
+    </button>
+
+    <h2>Guardrails and limits</h2>
+    <button onclick="redactDemo(this)">
+      <span class="label">Stream with PII</span>
+      <span class="hint">card and email removed mid stream</span>
+    </button>
+    <button onclick="burn(this)">
+      <span class="label">Exhaust a tenant budget</span>
+      <span class="hint">25 requests against a 2000 token limit</span>
+    </button>
+  </section>
+
+  <section>
+    <h2>Result</h2>
+    <div id="result"><div class="empty">Run a scenario on the left.</div></div>
+    <h2>Audit feed</h2>
+    <div id="feed" class="feed"><div class="empty">Waiting for events.</div></div>
+  </section>
+
+  <section>
+    <h2>Decisions</h2>
+    <div id="stats"></div>
+    <h2>Redacted</h2>
+    <div id="redactions"></div>
+    <h2>Tenants</h2>
+    <div id="tenants"></div>
+  </section>
+</main>
+
+<script>
+const API = '/console/api';
+let latestId = 0;
+let seen = new Set();
+
+async function j(url, opts) {
+  const r = await fetch(url, opts);
+  return r.json();
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function time(iso) {
+  try { return new Date(iso).toLocaleTimeString(); } catch { return ''; }
+}
+
+async function poll() {
+  try {
+    const data = await j(`${API}/events?since_id=${latestId}&limit=40`);
+    if (data.events?.length) {
+      latestId = Math.max(latestId, data.latest_id);
+      const feed = document.getElementById('feed');
+      if (seen.size === 0) feed.innerHTML = '';
+      for (const e of data.events.reverse()) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        const el = document.createElement('div');
+        el.className = `event ${e.decision}`;
+        const bits = Object.entries(e.detail || {})
+          .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+          .join('  ');
+        el.innerHTML =
+          `<div class="top">
+             <span class="decision">${esc(e.decision)}</span>
+             <span class="action">${esc(e.action)}</span>
+             <span class="component">${esc(e.component)}</span>
+             <span class="time">${time(e.occurred_at)}</span>
+           </div>` +
+          ((bits || e.actor) ? `<div class="meta">${esc(e.actor || '')}${bits ? '  ' + esc(bits) : ''}</div>` : '');
+        feed.prepend(el);
+      }
+      while (feed.children.length > 60) feed.lastChild.remove();
+    }
+  } catch (err) { /* keep polling */ }
+}
+
+async function stats() {
+  try {
+    const s = await j(`${API}/stats`);
+    document.getElementById('stats').innerHTML = `
+      ${row('blocked', s.blocked, 'red')}
+      ${row('unauthenticated', s.unauthenticated, 'red')}
+      ${row('rate limited', s.rate_limited, 'amber')}
+      ${row('failovers', s.failovers, 'amber')}
+      ${row('allowed', s.allowed, 'green')}`;
+    document.getElementById('redactions').innerHTML = `
+      ${row('email', s.redactions.email, 'purple')}
+      ${row('ssn', s.redactions.ssn, 'purple')}
+      ${row('credit card', s.redactions.credit_card, 'purple')}`;
+    document.getElementById('tenants').innerHTML = (s.tenants || []).map(t => {
+      const pct = Math.min(100, Math.round(100 * t.used / t.limit));
+      return `<div class="stat"><span class="k">${esc(t.name)}</span>
+                <span class="v">${t.used}/${t.limit}</span></div>
+              <div class="bar"><div class="${pct > 80 ? 'high' : ''}" style="width:${pct}%"></div></div>`;
+    }).join('');
+  } catch (err) { /* keep polling */ }
+}
+
+function row(k, v, cls) {
+  return `<div class="stat"><span class="k">${k}</span><span class="v ${v ? cls : ''}">${v ?? 0}</span></div>`;
+}
+
+async function health() {
+  const set = (id, ok) => {
+    document.getElementById(id).className = 'dot ' + (ok ? 'ok' : 'bad');
+  };
+  try {
+    const h = await j('/health');
+    set('llmDot', true);
+    const src = (h.policy_source || '').split('/').pop();
+    document.getElementById('policySrc').textContent = 'policy: ' + src;
+  } catch { set('llmDot', false); }
+  try {
+    const s = await j(`${API}/stats`);
+    set('mcpDot', true);
+  } catch { set('mcpDot', false); }
+}
+
+function show(html, cls) {
+  document.getElementById('result').innerHTML = `<div class="result ${cls || ''}">${html}</div>`;
+}
+
+async function busy(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } finally { btn.disabled = false; poll(); stats(); }
+}
+
+function scenario(name, btn) {
+  busy(btn, async () => {
+    show('Running against a live model…');
+    const r = await j(`${API}/scenario/${name}`, { method: 'POST' });
+    if (r.error) return show(esc(r.error));
+    const cls = r.blocked ? 'blocked' : 'allowed';
+    show(
+      `<div class="verdict">${esc(r.verdict)}</div>` +
+      `<div class="quote">${esc((r.customer_message || '').slice(0, 400))}</div>` +
+      `model chose: ${esc(r.model_called_tool || 'no tool')}\n` +
+      `gateway: ${esc(JSON.stringify(r.gateway_response, null, 2))}\n` +
+      `trace: ${esc(r.correlation_id)}`,
+      cls
+    );
+  });
+}
+
+function mcp(role, tool, args, btn) {
+  busy(btn, async () => {
+    const r = await j(`${API}/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, tool, arguments: args })
+    });
+    const blocked = r.response?.error?.code === -32001;
+    show(
+      `<div class="verdict">${esc(r.summary || '')}</div>` +
+      esc(JSON.stringify(r.response, null, 2)),
+      blocked ? 'blocked' : (r.response?.error ? '' : 'allowed')
+    );
+  });
+}
+
+function redactDemo(btn) {
+  busy(btn, async () => {
+    show('Streaming…');
+    const r = await j(`${API}/redaction-demo`, { method: 'POST' });
+    show(
+      `<div class="verdict">${esc(r.summary || '')}</div>` +
+      `<div class="quote">${esc(r.prompt || '')}</div>` +
+      esc(r.output || ''),
+      'allowed'
+    );
+  });
+}
+
+function burn(btn) {
+  busy(btn, async () => {
+    show('Sending 25 requests against a 2000 token limit…');
+    const r = await j(`${API}/burn-budget`, { method: 'POST' });
+    show(
+      `<div class="verdict">${esc(r.summary || '')}</div>` +
+      esc((r.codes || []).join(' ')),
+      'blocked'
+    );
+  });
+}
+
+health(); poll(); stats();
+setInterval(poll, 1500);
+setInterval(stats, 3000);
+setInterval(health, 10000);
+</script>
+</body>
+</html>

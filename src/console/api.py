@@ -11,8 +11,11 @@ would, rather than reaching into the internals.
 import json
 from typing import Any
 
+from pathlib import Path
+
 import httpx
 from fastapi import APIRouter, Query
+from fastapi.responses import HTMLResponse
 
 from src.core.config import settings
 from src.core.database import get_connection
@@ -22,6 +25,16 @@ from src.core.policy_config import policy
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/console/api", tags=["console"])
+page_router = APIRouter(tags=["console"])
+
+CONSOLE_HTML = Path(__file__).resolve().parent / "static" / "index.html"
+
+
+@page_router.get("/console", response_class=HTMLResponse)
+async def console_page() -> HTMLResponse:
+    """The operations console. A single file, so there is no build step and
+    nothing to deploy separately from the service it observes."""
+    return HTMLResponse(CONSOLE_HTML.read_text())
 
 
 def _row_to_event(row: Any) -> dict[str, Any]:
@@ -106,10 +119,6 @@ async def stats() -> dict[str, Any]:
             value = detail.get(kind)
             if isinstance(value, int):
                 redactions[kind] += value
-        # MCP tool result redactions report a single total rather than a
-        # breakdown, since the filter works on opaque text blocks.
-        if "redactions" in detail and not any(k in detail for k in redactions):
-            redactions["email"] += 0
 
     return {
         "blocked": by_decision.get("blocked", 0),
@@ -363,4 +372,159 @@ async def run_scenario(name: str) -> dict[str, Any]:
         "gateway_response": gateway_response,
         "blocked": blocked,
         "verdict": verdict,
+    }
+
+
+# ------------------------------------------------------------ direct actions
+
+
+def _issue_token(role: str, tenant: str = "tk_live_acme_9f2b", minutes: int = 5) -> str:
+    """A short lived token for a console action.
+
+    Minted here rather than held anywhere, so the console never stores a
+    credential and every action is traceable to the role it used.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    import jwt
+
+    from src.core.config import settings
+
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": f"console-{role}",
+            "role": role,
+            "tenant": tenant,
+            "iat": now,
+            "exp": now + timedelta(minutes=minutes),
+        },
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+
+
+@router.post("/call")
+async def direct_call(body: dict[str, Any]) -> dict[str, Any]:
+    """Send one tool call through the MCP gateway as a chosen role."""
+    from src.core.request_context import new_id
+
+    role = body.get("role", "viewer")
+    tool = body.get("tool", "")
+    arguments = body.get("arguments") or {}
+    correlation_id = new_id()
+
+    response = await call_mcp(
+        _issue_token(role),
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        },
+        correlation_id,
+    )
+
+    error = response.get("error")
+    if error and error.get("code") == -32001:
+        summary = f"{role} was refused {tool} before the request reached the server"
+    elif error and error.get("code") == -32602:
+        summary = "the arguments did not match the schema, so the call was rejected"
+    elif error:
+        summary = f"the call was rejected: {error.get('message')}"
+    else:
+        summary = f"{role} called {tool} and the result was returned"
+
+    return {"summary": summary, "correlation_id": correlation_id, "response": response}
+
+
+@router.post("/redaction-demo")
+async def redaction_demo() -> dict[str, Any]:
+    """Stream a reply containing PII and show what the client actually receives.
+
+    The chunks are consumed exactly as a client would consume them, so what is
+    shown is the redacted stream itself rather than a description of it.
+    """
+    from src.core.request_context import new_id
+    from src.llm_gateway.providers import build_primary
+    from src.llm_gateway.stream_handler import redacted_stream
+
+    prompt = (
+        "Reply with exactly this sentence and nothing else: "
+        "Contact Amara at amara.osei@example.com or on card 4111 1111 1111 1111."
+    )
+    correlation_id = new_id()
+
+    collected = ""
+    chunks = 0
+    try:
+        async for line in redacted_stream(
+            build_primary(),
+            {"messages": [{"role": "user", "content": prompt}], "max_tokens": 120},
+            "console",
+            f"console-{correlation_id}",
+        ):
+            payload = line.removeprefix("data: ").strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                parsed = json.loads(payload)
+            except ValueError:
+                continue
+            for choice in parsed.get("choices", []):
+                piece = (choice.get("delta") or {}).get("content")
+                if piece:
+                    collected += piece
+                    chunks += 1
+    except Exception as exc:
+        logger.error("redaction demo failed: %s", exc)
+        return {"summary": "The model provider could not be reached.", "output": ""}
+
+    removed = collected.count("[REDACTED]")
+    return {
+        "summary": (
+            f"{removed} value(s) removed across {chunks} streamed chunks, "
+            "while the response was still arriving"
+        ),
+        "prompt": prompt,
+        "output": collected,
+        "correlation_id": correlation_id,
+    }
+
+
+@router.post("/burn-budget")
+async def burn_budget() -> dict[str, Any]:
+    """Spend a small tenant's budget and show the limiter refusing.
+
+    Requests go through the gateway's own public endpoint, so the limiter under
+    test is the one serving real traffic.
+    """
+    token = _issue_token("viewer", tenant="tk_live_tiny_1c3e")
+    codes: list[int] = []
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for _ in range(25):
+            try:
+                response = await client.post(
+                    "http://127.0.0.1:8001/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 20,
+                    },
+                )
+                codes.append(response.status_code)
+            except Exception:
+                codes.append(0)
+            if codes.count(429) >= 3:
+                break
+
+    allowed = codes.count(200)
+    refused = codes.count(429)
+    return {
+        "summary": (
+            f"{allowed} requests allowed, then {refused} refused with 429. "
+            "The 2000 token limit divided by the 100 token minimum charge is 20."
+        ),
+        "codes": codes,
     }

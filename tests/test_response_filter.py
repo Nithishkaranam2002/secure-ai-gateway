@@ -33,8 +33,9 @@ class TestRedaction:
                 "status": "active",
             }
         )
-        cleaned, removed = redact_tool_result(tool_response(record))
-        assert removed == 1
+        cleaned, counts = redact_tool_result(tool_response(record))
+        assert counts.email == 1
+        assert counts.total == 1
         assert "amara.osei@example.com" not in text_of(cleaned)
         assert REDACTION_PLACEHOLDER in text_of(cleaned)
 
@@ -55,10 +56,13 @@ class TestRedaction:
         assert "active" in text
 
     def test_a_card_number_in_a_tool_result_is_removed(self) -> None:
-        cleaned, removed = redact_tool_result(
+        cleaned, counts = redact_tool_result(
             tool_response("Refund issued to card 4111 1111 1111 1111")
         )
-        assert removed == 1
+        # Counted as a card, not as an unlabelled total, so the audit trail
+        # matches what the streaming path reports for the same value.
+        assert counts.credit_card == 1
+        assert counts.email == 0
         assert "4111" not in text_of(cleaned)
 
     def test_multiple_blocks_are_each_cleaned(self) -> None:
@@ -72,16 +76,16 @@ class TestRedaction:
                 ]
             },
         }
-        cleaned, removed = redact_tool_result(response)
-        assert removed == 2
+        cleaned, counts = redact_tool_result(response)
+        assert counts.email == 2
         assert "@" not in json.dumps(cleaned["result"]["content"])
 
 
 class TestPassThrough:
     def test_clean_results_are_returned_unchanged(self) -> None:
         response = tool_response('{"customer_id": "CUST-10001", "status": "active"}')
-        cleaned, removed = redact_tool_result(response)
-        assert removed == 0
+        cleaned, counts = redact_tool_result(response)
+        assert counts.total == 0
         assert cleaned is response
 
     def test_an_error_response_is_left_alone(self) -> None:
@@ -90,9 +94,9 @@ class TestPassThrough:
             "id": 1,
             "error": {"code": -32001, "message": "Unauthorized Tool Call"},
         }
-        cleaned, removed = redact_tool_result(response)
+        cleaned, counts = redact_tool_result(response)
         assert cleaned == response
-        assert removed == 0
+        assert counts.total == 0
 
     def test_a_non_text_block_is_untouched(self) -> None:
         response = {
@@ -105,8 +109,8 @@ class TestPassThrough:
                 ]
             },
         }
-        cleaned, removed = redact_tool_result(response)
-        assert removed == 1
+        cleaned, counts = redact_tool_result(response)
+        assert counts.total == 1
         assert cleaned["result"]["content"][0] == response["result"]["content"][0]
 
     def test_a_malformed_result_does_not_crash(self) -> None:
@@ -116,8 +120,8 @@ class TestPassThrough:
             {"jsonrpc": "2.0", "id": 1, "result": {"content": "not a list"}},
             {"jsonrpc": "2.0", "id": 1, "result": {}},
         ]:
-            cleaned, removed = redact_tool_result(response)
-            assert removed == 0
+            cleaned, counts = redact_tool_result(response)
+            assert counts.total == 0
             assert cleaned == response
 
 
@@ -143,4 +147,4 @@ class TestBothPathsAgree:
         via_mcp, mcp_counts = redact_tool_result(tool_response(value))
 
         assert text_of(via_mcp) == via_llm
-        assert mcp_counts == llm_counts.total
+        assert mcp_counts.as_dict() == llm_counts.as_dict()
