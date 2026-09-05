@@ -62,6 +62,8 @@
   .event.rate_limited, .event.failover, .event.circuit_open { border-left-color: var(--amber); }
   .event.allowed, .event.clean { border-left-color: var(--green); }
   .event.not_found, .event.upstream_failure, .event.both_failed { border-left-color: var(--muted); }
+  .event.rejected_downstream { border-left-color: var(--amber); }
+  .event.rejected_downstream .decision { color: var(--amber); }
   .event .top { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
   .event .decision { font-weight: 600; }
   .event.blocked .decision, .event.unauthenticated .decision { color: var(--red); }
@@ -291,11 +293,14 @@ function mcp(role, tool, args, btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role, tool, arguments: args })
     });
-    const blocked = r.response?.error?.code === -32001;
+    // Any error is a refusal, whether the gateway blocked it or the server
+    // rejected it. Colouring only on -32001 made a schema rejection look like
+    // a successful call.
+    const refused = Boolean(r.response?.error);
     show(
       `<div class="verdict">${esc(r.summary || '')}</div>` +
       esc(JSON.stringify(r.response, null, 2)),
-      blocked ? 'blocked' : (r.response?.error ? '' : 'allowed')
+      refused ? 'blocked' : 'allowed'
     );
   });
 }

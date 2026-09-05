@@ -214,6 +214,23 @@ async def handle_mcp(request: Request) -> Response:
     # guardrail a model response does. A customer record read through a tool is
     # exactly as sensitive as one repeated by a model.
     if method == "tools/call":
+        # The gateway's allow only means the caller was permitted to try. The
+        # downstream server can still refuse on schema or business grounds, and
+        # an audit trail that records the permission without the outcome reads
+        # as though every permitted call succeeded.
+        downstream_error = response.get("error")
+        if isinstance(downstream_error, dict):
+            record(
+                COMPONENT,
+                "tools/call",
+                "rejected_downstream",
+                actor=actor,
+                detail={
+                    "tool": decision.tool_name,
+                    "code": downstream_error.get("code"),
+                },
+            )
+
         response, counts = redact_tool_result(response)
         if counts.total:
             # Recorded by type, matching what the streaming path reports, so the
