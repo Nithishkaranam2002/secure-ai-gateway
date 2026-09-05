@@ -201,3 +201,52 @@ threshold again.
 The breaker tracks the primary only. The backup is the last resort, so it is
 always attempted: skipping it would fail a request that might still have
 succeeded.
+
+## The console
+
+### A single static file, not a frontend
+
+`src/console/static/index.html` is one file with no build step, no package
+manager and no separate deployment. It is served by the LLM gateway at
+`/console`.
+
+A React application would have been a nicer development experience and a worse
+submission. It would add a dependency tree to a repository that currently has
+nine direct dependencies, a build step to a project that runs with one command,
+and a second thing to deploy. The console exists to demonstrate the four tasks,
+not to become the product.
+
+Everything it reads comes from the audit log, so it observes the same records
+that ordinary traffic writes. It cannot affect gateway behaviour.
+
+### The injection scenario is real, not staged
+
+`/console/api/scenario/injection` sends a hostile support message to a real
+model with both tools available and no instruction about which to call. Whatever
+the model decides is forwarded through the real MCP gateway holding a viewer
+token.
+
+So the block is a real refusal of a real decision. If the model declines the
+injection on its own, that outcome is reported as it happened rather than
+retried until it cooperates.
+
+This is the scenario the whole gateway exists for. Prompt injection cannot be
+reliably prevented at the model, so the defence is that the model holds a viewer
+token and the privileged tools are unreachable with it. Task 2 is what makes
+being fooled harmless.
+
+### The console surfaced two bugs the tests did not
+
+Redaction counts from the MCP path were being written to the audit log as a
+repr of an object rather than as integers, because the only caller of that code
+was the gateway itself and no test covered the call site. The counter on the
+console read zero while the feed clearly showed redactions happening.
+
+Separately, a malformed refund appeared in the feed as `allowed`, because the
+gateway recorded its authorisation decision and nothing about the outcome. The
+server was correctly rejecting it with `-32602`, but the trail read as though
+every permitted call succeeded. The gateway now records `rejected_downstream`
+alongside the permission.
+
+Both were found by looking at the system rather than by running the tests, which
+is an argument for building the view.
