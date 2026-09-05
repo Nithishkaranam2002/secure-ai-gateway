@@ -136,3 +136,68 @@ interchangeable just because they share a wire format. Three backup candidates
 were tried. One had been retired, one returned HTTP 200 with an empty body, and
 one returned its internal reasoning as the answer. All three accepted an
 identical request and reported success.
+
+## Beyond the brief
+
+Four things were added that the brief did not ask for. Each is here because
+building only what was asked would have left the system with a gap that mattered.
+
+### Tool results are redacted, not just model responses
+
+Task 3 removes sensitive values from a model's answer. Nothing in the brief asks
+for the same on the MCP path, and the first working version did not do it.
+
+That left a hole. `get_customer_record` returned a customer's email address in
+plain text, so an agent blocked from reading an address in a completion could
+call a tool and get it directly. A guardrail covering one route out and not the
+other is not a guardrail.
+
+`src/mcp_gateway/response_filter.py` closes it, and the redaction engine moved to
+`src/core/` because it is not an LLM concern. `tests/test_response_filter.py`
+asserts that both paths remove the same value from the same text.
+
+### Policy is configuration, not code
+
+The brief describes one rule: tools named `admin_*` require the admin role. That
+is easy to hardcode, and hardcoding it means the first customer whose privileged
+tools are named `internal_*` needs a code change, a review and a release.
+
+`config/policy.yaml` holds tool rules, roles, transparent methods, redaction
+settings and provider limits. A new deployment is a file edit.
+
+A malformed or missing file falls back to the built in defaults with a loud log
+line rather than refusing to start, because a gateway that will not boot over a
+configuration typo is worse than one that boots with known safe rules. The
+defaults protect `admin_*`, so the failure direction is safe.
+
+### Correlation ids, including across the process boundary
+
+One request crosses the gateway, the policy, the bridge and the MCP server, each
+writing its own records. Without a shared id, tracing a request means guessing
+from timestamps.
+
+A ContextVar carries the id within a process. It cannot cross into the MCP server,
+which is a separate process at the end of a pipe, so the bridge puts the id in
+`params._meta`, which MCP reserves for out of band data, and the server reads it
+back out. The result is one id covering the gateway's decision, the server's
+execution and the redaction applied to the reply.
+
+An inbound `X-Correlation-ID` header is honoured, so a trace can span more than
+this service.
+
+### A circuit breaker on the primary provider
+
+Failover alone means every request during an outage pays the full 3000 ms
+timeout before giving up. A hundred requests is a hundred wasted waits and a
+hundred connections held open, so the gateway stays slow for the whole outage
+despite knowing after the first failure that the provider is down.
+
+After three consecutive failures the primary is skipped entirely for thirty
+seconds. When that expires, exactly one request probes it while everything else
+continues to the backup, so a recovering provider is not hit by the full backlog
+at once. A failed probe restarts the cooldown rather than counting toward the
+threshold again.
+
+The breaker tracks the primary only. The backup is the last resort, so it is
+always attempted: skipping it would fail a request that might still have
+succeeded.
