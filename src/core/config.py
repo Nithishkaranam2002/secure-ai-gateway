@@ -39,6 +39,7 @@ class Settings:
     rate_limit_tokens_per_minute: int
     upstream_timeout_ms: int
     log_level: str
+    mcp_gateway_url: str
 
 
 def load_settings() -> Settings:
@@ -56,6 +57,10 @@ def load_settings() -> Settings:
         rate_limit_tokens_per_minute=_get_int("RATE_LIMIT_TOKENS_PER_MINUTE", 50000),
         upstream_timeout_ms=_get_int("UPSTREAM_TIMEOUT_MS", 3000),
         log_level=_get("LOG_LEVEL", "INFO"),
+        # Inside a container 127.0.0.1 is that container itself, so compose
+        # overrides this with the service name. The default suits running the
+        # two services directly on one machine.
+        mcp_gateway_url=_get("MCP_GATEWAY_URL", "http://127.0.0.1:8000"),
     )
 
 

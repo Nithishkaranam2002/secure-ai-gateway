@@ -26,8 +26,12 @@ services:
       - .env
     environment:
       DATABASE_PATH: /app/data/gateway.db
+      # Containers reach each other by service name, not by loopback.
+      MCP_GATEWAY_URL: http://mcp-gateway:8000
     volumes:
       - gateway-data:/app/data
+    depends_on:
+      - mcp-gateway
 
 volumes:
   gateway-data:
