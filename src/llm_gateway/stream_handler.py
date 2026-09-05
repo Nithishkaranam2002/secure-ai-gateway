@@ -17,7 +17,7 @@ from typing import Any
 from src.core.audit import record
 from src.core.logging_setup import get_logger
 from src.llm_gateway.providers import Provider
-from src.llm_gateway.redaction import StreamRedactor
+from src.core.redaction import StreamRedactor
 
 logger = get_logger(__name__)
 

@@ -7,7 +7,7 @@ be caught exactly as if it had arrived whole.
 
 import pytest
 
-from src.llm_gateway.redaction import (
+from src.core.redaction import (
     MAX_HOLDBACK,
     REDACTION_PLACEHOLDER,
     StreamRedactor,

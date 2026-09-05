@@ -25,6 +25,7 @@ from src.core.errors import (
 from src.core.logging_setup import get_logger
 from src.mcp_gateway.auth import AuthError, Principal, authenticate
 from src.mcp_gateway.policy import evaluate
+from src.mcp_gateway.response_filter import redact_tool_result
 from src.mcp_gateway.stdio_bridge import BridgeError, bridge
 
 logger = get_logger(__name__)
@@ -197,6 +198,20 @@ async def handle_mcp(request: Request) -> Response:
         return _handle_bridge_failure(request_id, method, actor, exc)
     except Exception as exc:  # pragma: no cover
         return _handle_bridge_failure(request_id, method, actor, exc)
+
+    # Tool results leave the trust boundary here, so they pass the same
+    # guardrail a model response does. A customer record read through a tool is
+    # exactly as sensitive as one repeated by a model.
+    if method == "tools/call":
+        response, removed = redact_tool_result(response)
+        if removed:
+            record(
+                COMPONENT,
+                "tools/call",
+                "redacted",
+                actor=actor,
+                detail={"tool": decision.tool_name, "redactions": removed},
+            )
 
     return _rpc(response)
 

@@ -246,7 +246,7 @@ async def chat_completions(request: Request) -> Any:
     if result.total_tokens:
         rate_limiter.settle(reservation, result.total_tokens)
 
-    from src.llm_gateway.redaction import redact_text
+    from src.core.redaction import redact_text
 
     payload = dict(result.body)
     redaction_total = 0

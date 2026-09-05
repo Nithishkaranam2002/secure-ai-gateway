@@ -15,7 +15,7 @@ through the rate limiter, the router and the redactor in a single request path.
 |------|-----------|------|-------|
 | 1 | MCP server, strict validation, stdio transport | `src/mcp_server/` | `test_schemas.py`, `test_tools.py`, `test_stdio_isolation.py` |
 | 2 | MCP security gateway, bearer auth and tool filtering | `src/mcp_gateway/` | `test_auth.py`, `test_policy.py`, `test_mcp_gateway.py` |
-| 3 | Streaming PII redaction | `src/llm_gateway/redaction.py`, `stream_handler.py` | `test_redaction.py`, `test_stream_handler.py` |
+| 3 | Streaming PII redaction | `src/core/redaction.py`, `llm_gateway/stream_handler.py` | `test_redaction.py`, `test_stream_handler.py` |
 | 4 | Rate limiting and model failover | `src/llm_gateway/rate_limiter.py`, `router.py` | `test_rate_limiter.py`, `test_router.py` |
 
 Shared foundation in `src/core/`: config, database, stderr only logging, audit
