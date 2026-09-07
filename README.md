@@ -1,13 +1,102 @@
 # Secure AI Gateway
 
-A security gateway for AI traffic. It controls which tools an agent is allowed
-to call, strips private data out of model responses while they are still
-streaming, meters usage per tenant, and keeps serving when a model provider
-fails.
+A security layer between AI agents and the systems they touch.
 
-Built for the Forward Deployed Engineer assessment. Four tasks, one system: the
-MCP gateway proxies to the MCP server, and the LLM gateway runs every response
-through the rate limiter, the router and the redactor in a single request path.
+Agents can be talked into almost anything by the text they read. This project
+sits in front of that risk: it decides which tools a caller may use, strips
+private data out of model responses while they stream, meters spend per tenant,
+and keeps serving when a model provider fails.
+
+Four assessment tasks, one system. The MCP gateway protects tool calls; the LLM
+gateway protects completions. Both write every decision to one audit log.
+
+## The console (live websites)
+
+The same interactive site is available in two places. Both serve the real
+gateways — every button fires a live request, not a mock.
+
+| Where | URL |
+|-------|-----|
+| **Deployed (public)** | [https://secure-ai-gateway-8d98.onrender.com/console](https://secure-ai-gateway-8d98.onrender.com/console) |
+| **Local single-process** | [http://127.0.0.1:8090/console](http://127.0.0.1:8090/console) |
+
+Local Docker splits the services (`:8000` MCP, `:8001` LLM); then the console is
+at **http://127.0.0.1:8001/console**.
+
+### Landing — what the product is
+
+<p align="center">
+  <img src="docs/images/console-hero.png" alt="Console hero: checked on the way in, cleaned on the way out" width="900">
+</p>
+
+The purple hero states the job in one line: every AI request is checked on the
+way in and cleaned on the way out. Status pills show both gateways are up, which
+policy file is loaded, and which models are wired (`gpt-4o-mini` → `allam-2-7b`).
+
+Below that, four cards map to the four assessment tasks:
+
+1. **Strict tool validation** — refuse impossible arguments (e.g. a negative refund)
+2. **Tool-level access control** — block privileged tools before they reach the server
+3. **Live PII redaction** — scrub emails, cards and SSNs while the answer streams
+4. **Limits and failover** — per-tenant budgets; switch providers when the primary hangs
+
+### Request path — how traffic moves
+
+<p align="center">
+  <img src="docs/images/console-flow.png" alt="How tool calls and completions flow through the gateway" width="900">
+</p>
+
+Two entry points, one foundation. Indigo boxes are this project; white boxes are
+the caller that already existed:
+
+- **Tool calls:** agent → MCP gateway (role + policy) → MCP server → redaction
+- **Completions:** app → rate limiter → router → streaming guardrail
+
+### Try it — demos and live counters
+
+<p align="center">
+  <img src="docs/images/console-demos.png" alt="Interactive demos and live counters on the console" width="900">
+</p>
+
+Each card states what it expects. A refusal is a **pass** when refusal is the
+correct outcome. The panel on the right shows the result of the run you just
+fired; the counters and decision feed underneath are the same audit log ordinary
+traffic writes to.
+
+**Start with Prompt injection** on the public site. A hostile support message
+persuades a real model to call `admin_reset_key`; the gateway returns `-32001`
+before the MCP server is contacted. That is the case this system exists for.
+
+### Overview (full first viewport)
+
+<p align="center">
+  <img src="docs/images/console-render.png" alt="Full console overview with capabilities and flow" width="900">
+</p>
+
+### What it does (summary)
+
+| # | Capability | What you get |
+|---|------------|--------------|
+| 1 | **Strict tool validation** | Schema-checked arguments; a refund of `-50` is refused, not paid |
+| 2 | **Tool-level access control** | Viewer tokens cannot reach `admin_*` tools; refusal happens before the MCP server |
+| 3 | **Live PII redaction** | Emails, SSNs and card numbers become `[REDACTED]` mid-stream, including values split across chunks |
+| 4 | **Limits and failover** | Per-tenant token budgets; if the primary hangs, the backup answers after a real timeout |
+
+### How a request flows (text)
+
+```
+AI agent  ──▶  MCP gateway  ──▶  MCP server
+               auth · policy · redact tool results
+
+Application ──▶  LLM gateway  ──▶  primary model
+                 rate limit · route · redact stream
+                                      └ fails over to backup
+                         │
+                         ▼
+                   SQLite audit log
+```
+
+Design trade-offs: `docs/decisions.md`. Request path in detail: `docs/architecture.md`.
 
 ## Where each task lives
 
@@ -60,7 +149,8 @@ pass or fail line for each. It is the fastest way to see the whole system work.
 
 ## The demo site
 
-Open **http://127.0.0.1:8001/console** once both services are running.
+Open **http://127.0.0.1:8001/console** once both services are running
+(or the live URL above for the deployed single-process app).
 
 It explains what the gateway does, shows how a request flows through it, and
 then lets you fire nine real requests at the running system. Every demo states
@@ -123,7 +213,7 @@ no package manager, nothing to deploy separately.
 pytest
 ```
 
-251 tests, no network access required.
+296 tests, no network access required.
 
 ## Two things that will save you time
 
