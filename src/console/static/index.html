@@ -3,337 +3,687 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Secure AI Gateway — Console</title>
+<title>Secure AI Gateway</title>
 <style>
   :root {
-    --bg: #0b0f14;
-    --panel: #121822;
-    --border: #1e2836;
-    --text: #d7dee8;
-    --muted: #7b8794;
-    --green: #3fb950;
-    --red: #f85149;
-    --amber: #d29922;
-    --blue: #58a6ff;
-    --purple: #bc8cff;
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --border: #e5e7eb;
+    --border-soft: #f0f1f5;
+    --ink: #0f172a;
+    --ink-2: #334155;
+    --muted: #64748b;
+    --indigo: #4f46e5;
+    --indigo-soft: #eef2ff;
+    --violet: #7c3aed;
+    --green: #047857;
+    --green-soft: #ecfdf5;
+    --red: #be123c;
+    --red-soft: #fff1f2;
+    --amber: #b45309;
+    --amber-soft: #fffbeb;
+    --purple: #6d28d9;
+    --purple-soft: #f5f3ff;
+    --sky: #0369a1;
+    --sky-soft: #f0f9ff;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 12px rgba(15,23,42,.05);
+    --shadow-lg: 0 2px 4px rgba(15,23,42,.04), 0 12px 32px rgba(15,23,42,.08);
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  header {
-    padding: 14px 20px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+
+  /* ---------------------------------------------------------------- hero */
+  .hero {
+    background: linear-gradient(135deg, #4338ca 0%, #6d28d9 55%, #9333ea 100%);
+    color: #fff; padding: 64px 0 76px; position: relative; overflow: hidden;
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
-  header .sub { color: var(--muted); font-size: 12px; }
-  header .health { margin-left: auto; color: var(--muted); font-size: 12px; }
-  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); margin-right: 5px; }
-  .dot.ok { background: var(--green); }
-  .dot.bad { background: var(--red); }
-
-  main { display: grid; grid-template-columns: 280px 1fr 260px; gap: 1px; background: var(--border); min-height: calc(100vh - 53px); }
-  section { background: var(--bg); padding: 16px; overflow-y: auto; max-height: calc(100vh - 53px); }
-  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
-  h2:not(:first-child) { margin-top: 24px; }
-
-  button {
-    display: block; width: 100%; text-align: left; margin-bottom: 6px;
-    background: var(--panel); color: var(--text); border: 1px solid var(--border);
-    padding: 9px 11px; border-radius: 5px; cursor: pointer;
-    font: inherit; transition: border-color .12s, background .12s;
+  .hero::after {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(700px 300px at 82% 8%, rgba(255,255,255,.16), transparent 70%);
   }
-  button:hover:not(:disabled) { border-color: var(--blue); background: #16202e; }
-  button:disabled { opacity: .45; cursor: wait; }
-  button .label { display: block; }
-  button .hint { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
-  button.danger:hover:not(:disabled) { border-color: var(--red); }
-
-  .feed { display: flex; flex-direction: column; gap: 4px; }
-  .event {
-    background: var(--panel); border: 1px solid var(--border); border-left-width: 3px;
-    border-radius: 4px; padding: 8px 11px;
-    animation: slide .25s ease-out;
+  .hero .wrap { position: relative; z-index: 1; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
+    padding: 5px 13px; border-radius: 999px; font-size: 12.5px;
+    letter-spacing: .3px; margin-bottom: 20px;
   }
-  @keyframes slide { from { opacity: 0; transform: translateY(-6px); } }
-  .event.blocked, .event.unauthenticated { border-left-color: var(--red); }
-  .event.redacted { border-left-color: var(--purple); }
-  .event.rate_limited, .event.failover, .event.circuit_open { border-left-color: var(--amber); }
-  .event.allowed, .event.clean { border-left-color: var(--green); }
-  .event.not_found, .event.upstream_failure, .event.both_failed { border-left-color: var(--muted); }
-  .event.rejected_downstream { border-left-color: var(--amber); }
-  .event.rejected_downstream .decision { color: var(--amber); }
-  .event .top { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-  .event .decision { font-weight: 600; }
-  .event.blocked .decision, .event.unauthenticated .decision { color: var(--red); }
-  .event.redacted .decision { color: var(--purple); }
-  .event.rate_limited .decision, .event.failover .decision, .event.circuit_open .decision { color: var(--amber); }
-  .event.allowed .decision, .event.clean .decision { color: var(--green); }
-  .event .action { color: var(--text); }
-  .event .component { color: var(--muted); font-size: 11px; }
-  .event .time { color: var(--muted); font-size: 11px; margin-left: auto; }
-  .event .meta { color: var(--muted); font-size: 11px; margin-top: 3px; word-break: break-all; }
-
-  .stat { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); }
-  .stat:last-child { border-bottom: 0; }
-  .stat .k { color: var(--muted); }
-  .stat .v { font-weight: 600; }
-  .v.red { color: var(--red); } .v.purple { color: var(--purple); }
-  .v.amber { color: var(--amber); } .v.green { color: var(--green); }
-
-  .bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; overflow: hidden; }
-  .bar > div { height: 100%; background: var(--blue); transition: width .3s; }
-  .bar > div.high { background: var(--red); }
-
-  .result {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
-    padding: 12px; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word;
-    font-size: 12px;
+  .hero h1 { font-size: 42px; line-height: 1.15; margin: 0 0 16px; letter-spacing: -.8px; font-weight: 700; }
+  .hero p.lead { font-size: 18px; max-width: 660px; margin: 0 0 28px; color: rgba(255,255,255,.9); }
+  .hero .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn-primary, .btn-ghost {
+    display: inline-block; padding: 11px 22px; border-radius: 9px;
+    font-size: 14.5px; font-weight: 600; text-decoration: none; transition: .15s;
   }
-  .result .verdict { font-weight: 600; margin-bottom: 8px; }
-  .result.blocked { border-color: var(--red); }
-  .result.blocked .verdict { color: var(--red); }
-  .result.allowed { border-color: var(--green); }
-  .result.allowed .verdict { color: var(--green); }
-  .result .quote { color: var(--muted); border-left: 2px solid var(--border); padding-left: 10px; margin: 8px 0; }
-  .empty { color: var(--muted); padding: 20px 0; }
+  .btn-primary { background: #fff; color: var(--indigo); }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(0,0,0,.16); }
+  .btn-ghost { border: 1px solid rgba(255,255,255,.38); color: #fff; }
+  .btn-ghost:hover { background: rgba(255,255,255,.12); }
+
+  .status-strip {
+    display: flex; gap: 10px; flex-wrap: wrap; margin-top: 34px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.2);
+    padding: 6px 13px; border-radius: 999px; font-size: 12.5px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
+  .dot.ok { background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,.25); }
+  .dot.bad { background: #fb7185; box-shadow: 0 0 0 3px rgba(251,113,133,.25); }
+
+  /* --------------------------------------------------------------- layout */
+  section.band { padding: 60px 0; }
+  section.band.alt { background: var(--surface); border-block: 1px solid var(--border); }
+  h2.section-title { font-size: 26px; margin: 0 0 8px; letter-spacing: -.4px; }
+  p.section-sub { color: var(--muted); margin: 0 0 32px; max-width: 720px; font-size: 15.5px; }
+
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 18px; }
+  .task-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; padding: 22px; box-shadow: var(--shadow);
+    border-top: 3px solid var(--accent, var(--indigo));
+  }
+  .task-card .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 27px; height: 27px; border-radius: 8px; font-size: 12.5px; font-weight: 700;
+    background: var(--accent-soft, var(--indigo-soft)); color: var(--accent, var(--indigo));
+    margin-bottom: 12px;
+  }
+  .task-card h3 { font-size: 15.5px; margin: 0 0 7px; }
+  .task-card p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* ------------------------------------------------------------------ flow */
+  .flow { display: grid; gap: 14px; }
+  .flow-row {
+    display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; padding: 20px; box-shadow: var(--shadow);
+  }
+  .flow-label {
+    flex: 0 0 128px; font-size: 12px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--muted); padding-top: 12px;
+  }
+  .node {
+    flex: 1 1 130px; min-width: 120px; border-radius: 10px; padding: 12px 14px;
+    border: 1px solid var(--border); background: #fcfcfd;
+  }
+  .node .t { font-size: 13.5px; font-weight: 600; }
+  .node .s { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .node.mine { background: var(--indigo-soft); border-color: #c7d2fe; }
+  .node.mine .t { color: var(--indigo); }
+  .arrow { align-self: center; color: #cbd5e1; font-size: 17px; }
+
+  /* ------------------------------------------------------------------ demo */
+  .demo-grid { display: grid; grid-template-columns: 1fr 400px; gap: 22px; align-items: start; }
+  @media (max-width: 1000px) { .demo-grid { grid-template-columns: 1fr; } }
+
+  .group { margin-bottom: 30px; }
+  .group h3 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .7px;
+    color: var(--muted); margin: 0 0 4px;
+  }
+  .group p.hint { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+
+  .demo-card {
+    text-align: left; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; cursor: pointer; font: inherit; color: inherit;
+    box-shadow: var(--shadow); transition: .15s; display: block; width: 100%;
+  }
+  .demo-card:hover:not(:disabled) { border-color: var(--indigo); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+  .demo-card:disabled { opacity: .55; cursor: progress; }
+  .demo-card .title { font-weight: 650; font-size: 14.5px; margin-bottom: 5px; }
+  .demo-card .desc { color: var(--muted); font-size: 13px; margin-bottom: 11px; }
+  .demo-card .expect {
+    font-size: 11.5px; padding: 4px 9px; border-radius: 6px; display: inline-block;
+    background: var(--indigo-soft); color: var(--indigo); font-weight: 600;
+  }
+  .demo-card.attack { border-left: 3px solid var(--red); }
+  .demo-card.attack .expect { background: var(--red-soft); color: var(--red); }
+
+  /* ---------------------------------------------------------------- result */
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; box-shadow: var(--shadow); overflow: hidden; margin-bottom: 20px;
+  }
+  .panel > h4 {
+    margin: 0; padding: 13px 18px; font-size: 12px; letter-spacing: .7px;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--border-soft); background: #fcfcfd;
+  }
+  .panel .body { padding: 18px; }
+
+  .verdict { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+  .verdict .mark {
+    flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 14px; font-weight: 700; color: #fff;
+  }
+  .verdict.pass .mark { background: var(--green); }
+  .verdict.fail .mark { background: var(--red); }
+  .verdict.wait .mark { background: var(--muted); }
+  .verdict .headline { font-weight: 650; font-size: 15px; }
+  .verdict.pass .headline { color: var(--green); }
+  .verdict.fail .headline { color: var(--red); }
+  .verdict .sub { color: var(--ink-2); font-size: 14px; margin-top: 3px; }
+
+  .quote {
+    background: #fcfcfd; border-left: 3px solid var(--border);
+    padding: 11px 14px; border-radius: 0 8px 8px 0; margin: 12px 0;
+    font-size: 13px; color: var(--ink-2); white-space: pre-wrap;
+  }
+  .kv { display: flex; gap: 8px; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--border-soft); }
+  .kv:last-child { border-bottom: 0; }
+  .kv .k { color: var(--muted); flex: 0 0 130px; }
+  .kv .v { font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--indigo); font-size: 13px; font-weight: 600; }
+  pre {
+    background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 9px;
+    overflow-x: auto; font-size: 12px; line-height: 1.55; margin: 10px 0 0;
+  }
+  .empty { color: var(--muted); font-size: 14px; }
+
+  /* ------------------------------------------------------------------ feed */
+  .feed { max-height: 520px; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; }
+  .ev {
+    border: 1px solid var(--border); border-left-width: 3px; border-radius: 9px;
+    padding: 9px 12px; background: var(--surface); animation: pop .22s ease-out;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(-5px); } }
+  .ev .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tag {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    padding: 2.5px 7px; border-radius: 5px;
+  }
+  .ev .what { font-size: 13px; font-weight: 600; }
+  .ev .who { font-size: 11.5px; color: var(--muted); }
+  .ev .when { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .ev .meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+
+  .ev.blocked, .ev.unauthenticated { border-left-color: var(--red); }
+  .ev.blocked .tag, .ev.unauthenticated .tag { background: var(--red-soft); color: var(--red); }
+  .ev.redacted { border-left-color: var(--purple); }
+  .ev.redacted .tag { background: var(--purple-soft); color: var(--purple); }
+  .ev.rate_limited, .ev.failover, .ev.circuit_open, .ev.rejected_downstream { border-left-color: var(--amber); }
+  .ev.rate_limited .tag, .ev.failover .tag, .ev.circuit_open .tag, .ev.rejected_downstream .tag { background: var(--amber-soft); color: var(--amber); }
+  .ev.allowed, .ev.clean { border-left-color: var(--green); }
+  .ev.allowed .tag, .ev.clean .tag { background: var(--green-soft); color: var(--green); }
+  .ev.not_found, .ev.upstream_failure, .ev.both_failed, .ev.streaming { border-left-color: #cbd5e1; }
+  .ev.not_found .tag, .ev.upstream_failure .tag, .ev.both_failed .tag, .ev.streaming .tag { background: #f1f5f9; color: var(--muted); }
+
+  /* ----------------------------------------------------------------- stats */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat {
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #fcfcfd;
+  }
+  .stat .num { font-size: 22px; font-weight: 700; line-height: 1.1; }
+  .stat .lbl { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .stat.red .num { color: var(--red); }
+  .stat.purple .num { color: var(--purple); }
+  .stat.amber .num { color: var(--amber); }
+  .stat.green .num { color: var(--green); }
+
+  .tenant { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+  .tenant:last-child { border-bottom: 0; }
+  .tenant .top { display: flex; justify-content: space-between; font-size: 13px; }
+  .tenant .amt { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .bar { height: 5px; background: #eef0f4; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--indigo); border-radius: 3px; transition: width .4s; }
+  .bar > div.full { background: var(--red); }
+
+  footer { padding: 34px 0; color: var(--muted); font-size: 13px; text-align: center; }
+  footer a { color: var(--indigo); }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Secure AI Gateway</h1>
-  <span class="sub">operations console</span>
-  <span class="health">
-    <span id="mcpDot" class="dot"></span>mcp
-    <span id="llmDot" class="dot" style="margin-left:12px"></span>llm
-    <span id="policySrc" style="margin-left:12px"></span>
-  </span>
-</header>
+<div class="hero">
+  <div class="wrap">
+    <span class="eyebrow">MCP &amp; LLM security gateway</span>
+    <h1>Every AI request, checked on the way in<br>and cleaned on the way out.</h1>
+    <p class="lead">
+      An AI agent can be talked into anything by the text it reads. This gateway sits
+      between agents and the systems they touch: it decides which tools each caller may
+      use, strips private data out of model responses while they stream, meters spend per
+      customer, and keeps serving when a model provider fails.
+    </p>
+    <div class="actions">
+      <a class="btn-primary" href="#try">Try the attack demo</a>
+      <a class="btn-ghost" href="#how">How it works</a>
+    </div>
+    <div class="status-strip">
+      <span class="pill"><span id="dotMcp" class="dot"></span>MCP gateway</span>
+      <span class="pill"><span id="dotLlm" class="dot"></span>LLM gateway</span>
+      <span class="pill" id="pillPolicy">policy loading…</span>
+      <span class="pill" id="pillModels">models loading…</span>
+    </div>
+  </div>
+</div>
 
-<main>
-  <section>
-    <h2>Attack simulation</h2>
-    <button class="danger" onclick="scenario('injection', this)">
-      <span class="label">Prompt injection</span>
-      <span class="hint">a real model, told to call admin_reset_key</span>
-    </button>
-    <button onclick="scenario('benign', this)">
-      <span class="label">Normal request</span>
-      <span class="hint">a genuine customer lookup</span>
-    </button>
+<section class="band">
+  <div class="wrap">
+    <h2 class="section-title">What it does</h2>
+    <p class="section-sub">Four capabilities, one request path. Each one exists because of a specific way AI systems leak data or get abused.</p>
+    <div class="grid-4">
+      <div class="task-card" style="--accent:#4f46e5;--accent-soft:#eef2ff">
+        <span class="n">1</span>
+        <h3>Strict tool validation</h3>
+        <p>Agents send malformed requests. Every tool argument is checked against a schema before anything runs, so a negative refund is refused rather than paid.</p>
+      </div>
+      <div class="task-card" style="--accent:#be123c;--accent-soft:#fff1f2">
+        <span class="n">2</span>
+        <h3>Tool level access control</h3>
+        <p>Each caller carries a role. Privileged tools are refused before the request reaches the server, so an agent that has been tricked cannot reach them.</p>
+      </div>
+      <div class="task-card" style="--accent:#6d28d9;--accent-soft:#f5f3ff">
+        <span class="n">3</span>
+        <h3>Live PII redaction</h3>
+        <p>Emails, card numbers and social security numbers are removed while the answer is still streaming, even when a value is split across two chunks.</p>
+      </div>
+      <div class="task-card" style="--accent:#b45309;--accent-soft:#fffbeb">
+        <span class="n">4</span>
+        <h3>Limits and failover</h3>
+        <p>Each customer gets a token budget on a sliding window. If the main provider is slow or refusing, traffic moves to a backup without the user noticing.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <h2>Access control</h2>
-    <button onclick="mcp('viewer','admin_reset_key',{},this)">
-      <span class="label">Viewer calls admin tool</span>
-      <span class="hint">expect -32001</span>
-    </button>
-    <button onclick="mcp('admin','admin_reset_key',{},this)">
-      <span class="label">Admin calls admin tool</span>
-      <span class="hint">forwarded downstream</span>
-    </button>
-    <button onclick="mcp('viewer','get_customer_record',{customer_id:'CUST-10001'},this)">
-      <span class="label">Read a customer record</span>
-      <span class="hint">email redacted on the way out</span>
-    </button>
-    <button onclick="mcp('viewer','trigger_refund',{customer_id:'CUST-10001',amount:-50,reason:'a negative refund'},this)">
-      <span class="label">Malformed refund</span>
-      <span class="hint">expect -32602</span>
-    </button>
+<section class="band alt" id="how">
+  <div class="wrap">
+    <h2 class="section-title">How a request flows</h2>
+    <p class="section-sub">Two entry points sharing one foundation. Everything in indigo is part of the gateway; everything else already existed.</p>
+    <div class="flow">
+      <div class="flow-row">
+        <div class="flow-label">Tool calls</div>
+        <div class="node"><div class="t">AI agent</div><div class="s">holds a viewer token</div></div>
+        <span class="arrow">&rarr;</span>
+        <div class="node mine"><div class="t">MCP gateway</div><div class="s">verify role, check policy</div></div>
+        <span class="arrow">&rarr;</span>
+        <div class="node mine"><div class="t">MCP server</div><div class="s">validate, then execute</div></div>
+        <span class="arrow">&rarr;</span>
+        <div class="node mine"><div class="t">Redaction</div><div class="s">clean the result</div></div>
+      </div>
+      <div class="flow-row">
+        <div class="flow-label">Completions</div>
+        <div class="node"><div class="t">Application</div><div class="s">sends a prompt</div></div>
+        <span class="arrow">&rarr;</span>
+        <div class="node mine"><div class="t">Rate limiter</div><div class="s">check tenant budget</div></div>
+        <span class="arrow">&rarr;</span>
+        <div class="node mine"><div class="t">Router</div><div class="s">primary, else backup</div></div>
+        <span class="arrow">&rarr;</span>
+        <div class="node mine"><div class="t">Guardrail</div><div class="s">redact mid stream</div></div>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <h2>Guardrails and limits</h2>
-    <button onclick="redactDemo(this)">
-      <span class="label">Stream with PII</span>
-      <span class="hint">card and email removed mid stream</span>
-    </button>
-    <button onclick="burn(this)">
-      <span class="label">Exhaust a tenant budget</span>
-      <span class="hint">25 requests against a 2000 token limit</span>
-    </button>
-  </section>
+<section class="band" id="try">
+  <div class="wrap">
+    <h2 class="section-title">Try it</h2>
+    <p class="section-sub">
+      Every button sends a real request through the running system. Each one states what it
+      expects to happen, and the result tells you whether the gateway behaved correctly.
+      A refusal is usually the correct outcome.
+    </p>
 
-  <section>
-    <h2>Result</h2>
-    <div id="result"><div class="empty">Run a scenario on the left.</div></div>
-    <h2>Audit feed</h2>
-    <div id="feed" class="feed"><div class="empty">Waiting for events.</div></div>
-  </section>
+    <div class="demo-grid">
+      <div>
+        <div class="group">
+          <h3>Attack simulation</h3>
+          <p class="hint">A real model reads a hostile support message with both tools available to it. It is never told what to call.</p>
+          <div class="cards">
+            <button class="demo-card attack" onclick="run('injection', this)">
+              <div class="title">Prompt injection</div>
+              <div class="desc">A customer message hides an instruction telling the agent it is in maintenance mode and must reset the API keys.</div>
+              <span class="expect">Expect: the model is fooled, the gateway blocks it</span>
+            </button>
+            <button class="demo-card" onclick="run('benign', this)">
+              <div class="title">Ordinary request</div>
+              <div class="desc">A genuine customer asking which plan they are on, with no attack in the message.</div>
+              <span class="expect">Expect: allowed, with the email redacted</span>
+            </button>
+          </div>
+        </div>
 
-  <section>
-    <h2>Decisions</h2>
-    <div id="stats"></div>
-    <h2>Redacted</h2>
-    <div id="redactions"></div>
-    <h2>Tenants</h2>
-    <div id="tenants"></div>
-  </section>
-</main>
+        <div class="group">
+          <h3>Access control</h3>
+          <p class="hint">The same request, sent with two different roles. Privileged tools are named with an admin prefix.</p>
+          <div class="cards">
+            <button class="demo-card" onclick="run('viewerAdmin', this)">
+              <div class="title">Viewer calls an admin tool</div>
+              <div class="desc">A read only caller attempts a privileged tool it has no right to use.</div>
+              <span class="expect">Expect: refused with -32001, server never contacted</span>
+            </button>
+            <button class="demo-card" onclick="run('adminAdmin', this)">
+              <div class="title">Admin calls the same tool</div>
+              <div class="desc">Identical request, admin token. It should reach the server, which does not define that tool.</div>
+              <span class="expect">Expect: forwarded, server replies -32601</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Data protection</h3>
+          <p class="hint">Sensitive values are removed on both routes out, whether they came from a tool or from a model.</p>
+          <div class="cards">
+            <button class="demo-card" onclick="run('record', this)">
+              <div class="title">Read a customer record</div>
+              <div class="desc">The stored record contains a real email address. The tool result passes the same guardrail a model answer does.</div>
+              <span class="expect">Expect: allowed, email replaced</span>
+            </button>
+            <button class="demo-card" onclick="run('stream', this)">
+              <div class="title">Stream a reply containing PII</div>
+              <div class="desc">A live model is asked to produce an email and a card number, redacted as the text arrives rather than afterwards.</div>
+              <span class="expect">Expect: both values removed mid stream</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Input validation and limits</h3>
+          <p class="hint">Two different kinds of refusal: one from the schema, one from the budget.</p>
+          <div class="cards">
+            <button class="demo-card" onclick="run('badRefund', this)">
+              <div class="title">Refund of minus 50</div>
+              <div class="desc">A well formed message carrying an impossible amount. Money moving the wrong way.</div>
+              <span class="expect">Expect: rejected with -32602, nothing written</span>
+            </button>
+            <button class="demo-card" onclick="run('burn', this)">
+              <div class="title">Exhaust a tenant budget</div>
+              <div class="desc">Twenty five requests from a customer with a 2000 token per minute limit. Takes a few seconds.</div>
+              <span class="expect">Expect: allowed, then 429 with a retry time</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <h4>Result</h4>
+          <div class="body" id="result">
+            <div class="empty">Pick a demo on the left. The result appears here.</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h4>Counters</h4>
+          <div class="body">
+            <div class="stat-grid" id="stats"></div>
+            <div style="margin-top:18px">
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:8px">Values removed</div>
+              <div class="stat-grid" id="redactions"></div>
+            </div>
+            <div style="margin-top:18px">
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:4px">Tenant usage, last 60s</div>
+              <div id="tenants"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band alt">
+  <div class="wrap">
+    <h2 class="section-title">Decision log</h2>
+    <p class="section-sub">Every decision either gateway makes is recorded here as it happens: what was blocked, what was redacted, which tenant ran out of budget. Redacted values themselves are never stored.</p>
+    <div class="panel">
+      <h4>Live feed</h4>
+      <div class="feed" id="feed"><div class="empty" style="padding:12px">Waiting for activity.</div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Secure AI Gateway &middot; interactive docs at <a href="/docs">/docs</a> &middot; every request above is real
+  </div>
+</footer>
 
 <script>
 const API = '/console/api';
-let latestId = 0;
-let seen = new Set();
+let latestId = 0, seen = new Set();
 
-async function j(url, opts) {
-  const r = await fetch(url, opts);
-  return r.json();
+const j = (u, o) => fetch(u, o).then(r => r.json());
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const clock = t => { try { return new Date(t).toLocaleTimeString(); } catch { return ''; } };
+const code = r => r?.response?.error?.code ?? r?.gateway_response?.error?.code ?? null;
+
+/* Each demo declares what it expects, so the result can be judged rather than
+   just displayed. A refusal is a pass when a refusal is what should happen. */
+const DEMOS = {
+  injection: {
+    running: 'Sending a hostile message to a live model…',
+    call: () => j(`${API}/scenario/injection`, { method: 'POST' }),
+    passed: r => r.blocked === true,
+    pass: 'Blocked. The model was fooled; the gateway was not.',
+    fail: 'The model declined the injection this time, so there was nothing to block.',
+    body: r => `
+      <div class="sub">${esc(r.verdict || '')}</div>
+      <div class="quote">${esc((r.customer_message || '').slice(0, 460))}</div>
+      ${kv('Model chose', r.model_called_tool || 'no tool')}
+      ${kv('Gateway said', code(r) === -32001 ? '-32001 Unauthorized Tool Call' : 'allowed')}
+      ${kv('Reached server', code(r) === -32001 ? 'no' : 'yes')}
+      ${kv('Trace id', r.correlation_id)}
+      ${raw(r.gateway_response)}`
+  },
+  benign: {
+    running: 'Asking a live model to handle an ordinary request…',
+    call: () => j(`${API}/scenario/benign`, { method: 'POST' }),
+    passed: r => r.blocked === false && r.model_called_tool,
+    pass: 'Allowed, and the record came back with the email removed.',
+    fail: 'The request did not complete as expected.',
+    body: r => `
+      <div class="sub">A legitimate request is not obstructed. The guardrail still applies to what comes back.</div>
+      <div class="quote">${esc(r.customer_message || '')}</div>
+      ${kv('Model chose', r.model_called_tool || 'no tool')}
+      ${kv('Trace id', r.correlation_id)}
+      ${raw(r.gateway_response)}`
+  },
+  viewerAdmin: {
+    running: 'Calling a privileged tool as a viewer…',
+    call: () => mcpCall('viewer', 'admin_reset_key', {}),
+    passed: r => code(r) === -32001,
+    pass: 'Refused with -32001, before the request reached the server.',
+    fail: 'The call was not refused, which it should have been.',
+    body: r => `
+      <div class="sub">The refusal happens at the gateway. By the time a privileged tool has run, blocking it is too late.</div>
+      ${kv('Role', 'viewer')}${kv('Tool', 'admin_reset_key')}
+      ${kv('Reached server', 'no')}${kv('Trace id', r.correlation_id)}
+      ${raw(r.response)}`
+  },
+  adminAdmin: {
+    running: 'Calling the same tool as an admin…',
+    call: () => mcpCall('admin', 'admin_reset_key', {}),
+    passed: r => code(r) === -32601,
+    pass: 'Forwarded. The server replied -32601, which proves it really was reached.',
+    fail: 'The request did not reach the server.',
+    body: r => `
+      <div class="sub">Same request, different token. -32601 means unknown method, so the gateway passed it through and the server answered.</div>
+      ${kv('Role', 'admin')}${kv('Tool', 'admin_reset_key')}
+      ${kv('Reached server', 'yes')}${kv('Trace id', r.correlation_id)}
+      ${raw(r.response)}`
+  },
+  record: {
+    running: 'Reading a customer record…',
+    call: () => mcpCall('viewer', 'get_customer_record', { customer_id: 'CUST-10001' }),
+    passed: r => !r.response?.error && JSON.stringify(r.response).includes('REDACTED'),
+    pass: 'Allowed, and the email address was replaced before the result left the gateway.',
+    fail: 'The record came back without redaction.',
+    body: r => `
+      <div class="sub">Redaction covers tool results as well as model answers. Otherwise an agent denied an address in a completion could just ask a tool for it.</div>
+      ${kv('Trace id', r.correlation_id)}
+      ${raw(r.response)}`
+  },
+  stream: {
+    running: 'Streaming from a live model…',
+    call: () => j(`${API}/redaction-demo`, { method: 'POST' }),
+    passed: r => (r.output || '').includes('[REDACTED]'),
+    pass: 'Both values were removed while the response was still arriving.',
+    fail: 'The model did not produce the values, so there was nothing to redact.',
+    body: r => `
+      <div class="sub">${esc(r.summary || '')}</div>
+      <div class="quote">${esc(r.prompt || '')}</div>
+      <div style="font-size:13px;margin-top:8px"><strong>What the client received:</strong></div>
+      <div class="quote">${esc(r.output || '')}</div>
+      ${kv('Trace id', r.correlation_id)}`
+  },
+  badRefund: {
+    running: 'Submitting a refund of minus 50…',
+    call: () => mcpCall('viewer', 'trigger_refund',
+      { customer_id: 'CUST-10001', amount: -50, reason: 'a negative refund' }),
+    passed: r => code(r) === -32602,
+    pass: 'Rejected with -32602. No refund was written.',
+    fail: 'The refund was not rejected, which is a validation failure.',
+    body: r => `
+      <div class="sub">The caller was permitted to try, so the gateway allowed it through. The server refused it on the schema. Both are recorded.</div>
+      ${kv('Amount sent', '-50')}${kv('Refund written', 'no')}
+      ${kv('Trace id', r.correlation_id)}
+      ${raw(r.response)}`
+  },
+  burn: {
+    running: 'Sending 25 requests against a 2000 token limit…',
+    call: () => j(`${API}/burn-budget`, { method: 'POST' }),
+    passed: r => (r.codes || []).includes(429),
+    pass: 'The tenant was cut off once its budget was spent.',
+    fail: 'The limit was not reached.',
+    body: r => `
+      <div class="sub">${esc(r.summary || '')}</div>
+      <div class="quote" style="font-family:ui-monospace,Menlo,monospace">${esc((r.codes || []).join('  '))}</div>
+      <div class="sub" style="margin-top:8px">Other tenants are unaffected; each budget is counted separately.</div>`
+  }
+};
+
+function kv(k, v) {
+  return `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+}
+function raw(obj) {
+  if (!obj) return '';
+  return `<details><summary>Raw response</summary><pre>${esc(JSON.stringify(obj, null, 2))}</pre></details>`;
+}
+function mcpCall(role, tool, args) {
+  return j(`${API}/call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, tool, arguments: args })
+  });
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function paint(state, headline, inner) {
+  document.getElementById('result').innerHTML =
+    `<div class="verdict ${state}">
+       <div class="mark">${state === 'pass' ? '✓' : state === 'fail' ? '!' : '·'}</div>
+       <div><div class="headline">${esc(headline)}</div>${inner || ''}</div>
+     </div>`;
 }
 
-function time(iso) {
-  try { return new Date(iso).toLocaleTimeString(); } catch { return ''; }
+async function run(name, btn) {
+  const demo = DEMOS[name];
+  document.querySelectorAll('.demo-card').forEach(b => b.disabled = true);
+  paint('wait', demo.running, '');
+  try {
+    const r = await demo.call();
+    if (r.error && typeof r.error === 'string') {
+      paint('fail', 'The request could not complete.', `<div class="sub">${esc(r.error)}</div>`);
+    } else {
+      const ok = demo.passed(r);
+      paint(ok ? 'pass' : 'fail', ok ? demo.pass : demo.fail, demo.body(r));
+    }
+  } catch (e) {
+    paint('fail', 'The request could not complete.', `<div class="sub">${esc(e.message || e)}</div>`);
+  } finally {
+    document.querySelectorAll('.demo-card').forEach(b => b.disabled = false);
+    poll(); stats();
+  }
 }
 
 async function poll() {
   try {
-    const data = await j(`${API}/events?since_id=${latestId}&limit=40`);
-    if (data.events?.length) {
-      latestId = Math.max(latestId, data.latest_id);
-      const feed = document.getElementById('feed');
-      if (seen.size === 0) feed.innerHTML = '';
-      for (const e of data.events.reverse()) {
-        if (seen.has(e.id)) continue;
-        seen.add(e.id);
-        const el = document.createElement('div');
-        el.className = `event ${e.decision}`;
-        const bits = Object.entries(e.detail || {})
-          .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
-          .join('  ');
-        el.innerHTML =
-          `<div class="top">
-             <span class="decision">${esc(e.decision)}</span>
-             <span class="action">${esc(e.action)}</span>
-             <span class="component">${esc(e.component)}</span>
-             <span class="time">${time(e.occurred_at)}</span>
-           </div>` +
-          ((bits || e.actor) ? `<div class="meta">${esc(e.actor || '')}${bits ? '  ' + esc(bits) : ''}</div>` : '');
-        feed.prepend(el);
-      }
-      while (feed.children.length > 60) feed.lastChild.remove();
+    const d = await j(`${API}/events?since_id=${latestId}&limit=40`);
+    if (!d.events?.length) return;
+    latestId = Math.max(latestId, d.latest_id);
+    const feed = document.getElementById('feed');
+    if (!seen.size) feed.innerHTML = '';
+    for (const e of d.events.reverse()) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+      const meta = Object.entries(e.detail || {})
+        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join('  ');
+      const el = document.createElement('div');
+      el.className = `ev ${e.decision}`;
+      el.innerHTML =
+        `<div class="row1">
+           <span class="tag">${esc(e.decision.replace(/_/g, ' '))}</span>
+           <span class="what">${esc(e.action)}</span>
+           <span class="who">${esc(e.component)}</span>
+           <span class="when">${clock(e.occurred_at)}</span>
+         </div>` +
+        ((meta || e.actor) ? `<div class="meta">${esc(e.actor || '')}${meta ? '  ' + esc(meta) : ''}</div>` : '');
+      feed.prepend(el);
     }
-  } catch (err) { /* keep polling */ }
+    while (feed.children.length > 70) feed.lastChild.remove();
+  } catch {}
 }
+
+const box = (n, l, c) => `<div class="stat ${c || ''}"><div class="num">${n ?? 0}</div><div class="lbl">${l}</div></div>`;
 
 async function stats() {
   try {
     const s = await j(`${API}/stats`);
-    document.getElementById('stats').innerHTML = `
-      ${row('blocked', s.blocked, 'red')}
-      ${row('unauthenticated', s.unauthenticated, 'red')}
-      ${row('rate limited', s.rate_limited, 'amber')}
-      ${row('failovers', s.failovers, 'amber')}
-      ${row('allowed', s.allowed, 'green')}`;
-    document.getElementById('redactions').innerHTML = `
-      ${row('email', s.redactions.email, 'purple')}
-      ${row('ssn', s.redactions.ssn, 'purple')}
-      ${row('credit card', s.redactions.credit_card, 'purple')}`;
+    document.getElementById('stats').innerHTML =
+      box(s.blocked, 'tool calls blocked', 'red') +
+      box(s.rate_limited, 'requests rate limited', 'amber') +
+      box(s.allowed, 'requests allowed', 'green') +
+      box(s.failovers, 'provider failovers', 'amber');
+    document.getElementById('redactions').innerHTML =
+      box(s.redactions.email, 'email addresses', 'purple') +
+      box(s.redactions.credit_card, 'card numbers', 'purple') +
+      box(s.redactions.ssn, 'social security', 'purple') +
+      box(s.redaction_total, 'total removed', 'purple');
     document.getElementById('tenants').innerHTML = (s.tenants || []).map(t => {
       const pct = Math.min(100, Math.round(100 * t.used / t.limit));
-      return `<div class="stat"><span class="k">${esc(t.name)}</span>
-                <span class="v">${t.used}/${t.limit}</span></div>
-              <div class="bar"><div class="${pct > 80 ? 'high' : ''}" style="width:${pct}%"></div></div>`;
+      return `<div class="tenant">
+                <div class="top"><span>${esc(t.name)}</span>
+                  <span class="amt">${t.used} / ${t.limit}</span></div>
+                <div class="bar"><div class="${pct >= 100 ? 'full' : ''}" style="width:${pct}%"></div></div>
+              </div>`;
     }).join('');
-  } catch (err) { /* keep polling */ }
-}
-
-function row(k, v, cls) {
-  return `<div class="stat"><span class="k">${k}</span><span class="v ${v ? cls : ''}">${v ?? 0}</span></div>`;
+  } catch {}
 }
 
 async function health() {
-  const set = (id, ok) => {
-    document.getElementById(id).className = 'dot ' + (ok ? 'ok' : 'bad');
-  };
   try {
     const h = await j('/health');
-    set('llmDot', true);
-    const src = (h.policy_source || '').split('/').pop();
-    document.getElementById('policySrc').textContent = 'policy: ' + src;
-  } catch { set('llmDot', false); }
+    document.getElementById('dotLlm').className = 'dot ok';
+    document.getElementById('pillPolicy').textContent =
+      'policy: ' + (h.policy_source || '').split('/').pop();
+    document.getElementById('pillModels').textContent =
+      `${h.primary} → ${h.backup}`;
+  } catch {
+    document.getElementById('dotLlm').className = 'dot bad';
+  }
   try {
-    const s = await j(`${API}/stats`);
-    set('mcpDot', true);
-  } catch { set('mcpDot', false); }
-}
-
-function show(html, cls) {
-  document.getElementById('result').innerHTML = `<div class="result ${cls || ''}">${html}</div>`;
-}
-
-async function busy(btn, fn) {
-  btn.disabled = true;
-  try { await fn(); } finally { btn.disabled = false; poll(); stats(); }
-}
-
-function scenario(name, btn) {
-  busy(btn, async () => {
-    show('Running against a live model…');
-    const r = await j(`${API}/scenario/${name}`, { method: 'POST' });
-    if (r.error) return show(esc(r.error));
-    const cls = r.blocked ? 'blocked' : 'allowed';
-    show(
-      `<div class="verdict">${esc(r.verdict)}</div>` +
-      `<div class="quote">${esc((r.customer_message || '').slice(0, 400))}</div>` +
-      `model chose: ${esc(r.model_called_tool || 'no tool')}\n` +
-      `gateway: ${esc(JSON.stringify(r.gateway_response, null, 2))}\n` +
-      `trace: ${esc(r.correlation_id)}`,
-      cls
-    );
-  });
-}
-
-function mcp(role, tool, args, btn) {
-  busy(btn, async () => {
-    const r = await j(`${API}/call`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, tool, arguments: args })
-    });
-    // Any error is a refusal, whether the gateway blocked it or the server
-    // rejected it. Colouring only on -32001 made a schema rejection look like
-    // a successful call.
-    const refused = Boolean(r.response?.error);
-    show(
-      `<div class="verdict">${esc(r.summary || '')}</div>` +
-      esc(JSON.stringify(r.response, null, 2)),
-      refused ? 'blocked' : 'allowed'
-    );
-  });
-}
-
-function redactDemo(btn) {
-  busy(btn, async () => {
-    show('Streaming…');
-    const r = await j(`${API}/redaction-demo`, { method: 'POST' });
-    show(
-      `<div class="verdict">${esc(r.summary || '')}</div>` +
-      `<div class="quote">${esc(r.prompt || '')}</div>` +
-      esc(r.output || ''),
-      'allowed'
-    );
-  });
-}
-
-function burn(btn) {
-  busy(btn, async () => {
-    show('Sending 25 requests against a 2000 token limit…');
-    const r = await j(`${API}/burn-budget`, { method: 'POST' });
-    show(
-      `<div class="verdict">${esc(r.summary || '')}</div>` +
-      esc((r.codes || []).join(' ')),
-      'blocked'
-    );
-  });
+    await j(`${API}/policy`);
+    document.getElementById('dotMcp').className = 'dot ok';
+  } catch {
+    document.getElementById('dotMcp').className = 'dot bad';
+  }
 }
 
 health(); poll(); stats();
 setInterval(poll, 1500);
 setInterval(stats, 3000);
-setInterval(health, 10000);
+setInterval(health, 15000);
 </script>
 </body>
 </html>

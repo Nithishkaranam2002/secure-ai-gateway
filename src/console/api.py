@@ -499,18 +499,26 @@ async def burn_budget() -> dict[str, Any]:
     Requests go through the gateway's own public endpoint, so the limiter under
     test is the one serving real traffic.
     """
-    token = _issue_token("viewer", tenant="tk_live_tiny_1c3e")
     codes: list[int] = []
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for _ in range(25):
+            # A fresh token per request. Minting one and holding it across the
+            # loop looks harmless until the loop outlives the token, and then
+            # every later request is refused as expired rather than rate
+            # limited. Short lived credentials have to be treated as short
+            # lived by the client that holds them.
+            token = _issue_token("viewer", tenant="tk_live_tiny_1c3e")
             try:
                 response = await client.post(
                     "http://127.0.0.1:8001/v1/chat/completions",
                     headers={"Authorization": f"Bearer {token}"},
+                    # Deliberately tiny. The limiter fires on the minimum charge
+                    # per request, not on the size of the answer, so there is no
+                    # reason to spend twenty five real completions proving it.
                     json={
                         "messages": [{"role": "user", "content": "hi"}],
-                        "max_tokens": 20,
+                        "max_tokens": 1,
                     },
                 )
                 codes.append(response.status_code)
@@ -521,10 +529,17 @@ async def burn_budget() -> dict[str, Any]:
 
     allowed = codes.count(200)
     refused = codes.count(429)
-    return {
-        "summary": (
+    other = [c for c in codes if c not in (200, 429)]
+
+    if other:
+        summary = (
+            f"Unexpected responses: {sorted(set(other))}. "
+            f"{allowed} allowed, {refused} rate limited."
+        )
+    else:
+        summary = (
             f"{allowed} requests allowed, then {refused} refused with 429. "
             "The 2000 token limit divided by the 100 token minimum charge is 20."
-        ),
-        "codes": codes,
-    }
+        )
+
+    return {"summary": summary, "codes": codes}
