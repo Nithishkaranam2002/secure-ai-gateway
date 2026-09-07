@@ -119,6 +119,11 @@ cp .env.example .env
 # set OPENAI_API_KEY and GROQ_API_KEY
 ```
 
+Tasks 1 and 2 run without any keys. Tasks 3 and 4 call real providers, so
+`scripts/demo.sh` reports 10 of 16 until real keys are set, and 16 of 16 once
+they are. The placeholder values in `.env.example` are deliberate; no working
+key is committed to this repository.
+
 ### With Docker
 
 ```bash
