@@ -389,6 +389,18 @@
         </div>
 
         <div class="group">
+          <h3>Resilience</h3>
+          <p class="hint">Providers go down. The gateway is the single point every AI feature passes through, so it has to survive that.</p>
+          <div class="cards">
+            <button class="demo-card attack" onclick="run('failover', this)">
+              <div class="title">Kill the primary provider</div>
+              <div class="desc">The main provider is pointed at an address that routes nowhere, so the connection really hangs. Takes about three seconds.</div>
+              <span class="expect">Expect: cancelled at 3s, backup answers instead</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="group">
           <h3>Input validation and limits</h3>
           <p class="hint">Two different kinds of refusal: one from the schema, one from the budget.</p>
           <div class="cards">
@@ -550,6 +562,21 @@ const DEMOS = {
       ${kv('Amount sent', '-50')}${kv('Refund written', 'no')}
       ${kv('Trace id', r.correlation_id)}
       ${raw(r.response)}`
+  },
+  failover: {
+    running: 'Waiting for the primary to time out…',
+    call: () => j(`${API}/failover-demo`, { method: 'POST' }),
+    passed: r => r.failed_over === true,
+    pass: 'The primary was cancelled and the backup answered.',
+    fail: 'The failover did not complete.',
+    body: r => `
+      <div class="sub">${esc(r.summary || r.error || '')}</div>
+      ${kv('Served by', `${r.served_by || '—'} (${r.model || '—'})`)}
+      ${kv('Time to failover', r.elapsed_ms ? r.elapsed_ms + ' ms' : '—')}
+      ${kv('Circuit state', r.circuit_state || '—')}
+      ${kv('Trace id', r.correlation_id)}
+      ${r.answer ? `<div class="quote">${esc(r.answer)}</div>` : ''}
+      <div class="sub" style="margin-top:8px">The timeout bounds silence, not the length of an answer. A healthy stream that runs for a minute is left alone; a provider that says nothing for three seconds is not.</div>`
   },
   burn: {
     running: 'Sending 25 requests against a 2000 token limit…',

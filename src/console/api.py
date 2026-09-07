@@ -543,3 +543,77 @@ async def burn_budget() -> dict[str, Any]:
         )
 
     return {"summary": summary, "codes": codes}
+
+
+@router.post("/failover-demo")
+async def failover_demo() -> dict[str, Any]:
+    """Force the primary to fail and show the backup answering.
+
+    The primary is pointed at an address in a range that is routed nowhere, so
+    the connection genuinely hangs and the deadline genuinely fires. Nothing is
+    simulated: the timeout is real, the cancellation is real, and the answer
+    comes from a different company's servers.
+
+    This is the one path that cannot be demonstrated against a healthy provider,
+    because a provider cannot be asked to fail on request.
+    """
+    import time
+
+    from src.core.request_context import new_id
+    from src.llm_gateway.providers import Provider, ProviderConfig, build_backup
+    from src.llm_gateway.router import ModelRouter
+
+    correlation_id = new_id()
+
+    # 10.255.255.1 is a private address with no route, so packets are dropped
+    # rather than refused. A refused connection would fail instantly and prove
+    # nothing about the timeout.
+    dead_primary = Provider(
+        ProviderConfig(
+            name="primary",
+            base_url="https://10.255.255.1/v1",
+            api_key="unused",
+            model="gpt-4o-mini",
+        ),
+        3000,
+    )
+
+    router_under_test = ModelRouter(primary=dead_primary, backup=build_backup())
+
+    started = time.perf_counter()
+    try:
+        result = await router_under_test.complete(
+            {
+                "messages": [{"role": "user", "content": "Say hello in five words."}],
+                "max_tokens": 40,
+            },
+            actor="console",
+        )
+    except Exception as exc:
+        logger.error("failover demo could not complete: %s", exc)
+        return {
+            "failed_over": False,
+            "error": f"Neither provider could be reached: {type(exc).__name__}",
+            "correlation_id": correlation_id,
+        }
+
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    breaker = router_under_test.primary_breaker.status()
+
+    return {
+        "failed_over": result.failed_over,
+        "served_by": result.provider_name,
+        "model": result.model,
+        "elapsed_ms": elapsed_ms,
+        "tokens": result.total_tokens,
+        "answer": (result.body.get("choices") or [{}])[0]
+        .get("message", {})
+        .get("content", ""),
+        "circuit_state": breaker.state.value,
+        "consecutive_failures": breaker.consecutive_failures,
+        "correlation_id": correlation_id,
+        "summary": (
+            f"The primary was unreachable. After {elapsed_ms} ms the request was "
+            f"cancelled and {result.model} answered instead."
+        ),
+    }
