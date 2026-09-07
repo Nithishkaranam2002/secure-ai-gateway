@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh
 
 # The console is a single static file served by the LLM gateway, so it ships
 # inside the image rather than being deployed separately.

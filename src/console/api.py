@@ -11,6 +11,7 @@ would, rather than reaching into the internals.
 import json
 from typing import Any
 
+import os
 from pathlib import Path
 
 import httpx
@@ -183,18 +184,47 @@ async def trace(correlation_id: str) -> dict[str, Any]:
     }
 
 
+def _single_process() -> bool:
+    """True when both gateways are running inside this process.
+
+    In that deployment the LLM gateway reaching the MCP gateway over HTTP is a
+    loopback to this same server, which needs the port and mount path to be
+    known correctly at import time. Calling the mounted app in memory instead
+    removes that coupling entirely, and removes a network hop that never leaves
+    the machine.
+    """
+    return os.getenv("SINGLE_PROCESS", "").lower() in {"1", "true", "yes"}
+
+
 async def call_mcp(token: str, payload: dict[str, Any], correlation_id: str) -> dict[str, Any]:
-    """Send one JSON-RPC message through the real MCP gateway."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{settings.mcp_gateway_url}/mcp",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-                "X-Correlation-ID": correlation_id,
-            },
-            json=payload,
-        )
+    """Send one JSON-RPC message through the real MCP gateway.
+
+    The request goes through the gateway's own endpoint either way, so the
+    policy, the audit trail and the bridge all behave identically. Only the
+    transport differs.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "X-Correlation-ID": correlation_id,
+    }
+
+    if _single_process():
+        from httpx import ASGITransport
+
+        from src.mcp_gateway.app import app as mcp_app
+
+        transport = ASGITransport(app=mcp_app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://mcp-gateway", timeout=30.0
+        ) as client:
+            response = await client.post("/mcp", headers=headers, json=payload)
+    else:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.mcp_gateway_url}/mcp", headers=headers, json=payload
+            )
+
     try:
         return response.json()
     except ValueError:
@@ -501,7 +531,17 @@ async def burn_budget() -> dict[str, Any]:
     """
     codes: list[int] = []
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # The LLM gateway calling itself. Hardcoding a port breaks the moment the
+    # deployment shape changes, so the app is called in memory instead.
+    from httpx import ASGITransport
+
+    from src.llm_gateway.app import app as llm_app
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=llm_app),
+        base_url="http://llm-gateway",
+        timeout=30.0,
+    ) as client:
         for _ in range(25):
             # A fresh token per request. Minting one and holding it across the
             # loop looks harmless until the loop outlives the token, and then
@@ -511,7 +551,7 @@ async def burn_budget() -> dict[str, Any]:
             token = _issue_token("viewer", tenant="tk_live_tiny_1c3e")
             try:
                 response = await client.post(
-                    "http://127.0.0.1:8001/v1/chat/completions",
+                    "/v1/chat/completions",
                     headers={"Authorization": f"Bearer {token}"},
                     # Deliberately tiny. The limiter fires on the minimum charge
                     # per request, not on the size of the answer, so there is no

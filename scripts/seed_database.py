@@ -19,9 +19,12 @@ CUSTOMERS = [
     ("CUST-10005", "Ethan Blake", "ethan.blake@example.com", "starter", "closed"),
 ]
 
+# The first two scale with the deployment. The third is deliberately small in
+# every environment, because the rate limiting demo needs a budget that can be
+# exhausted in a handful of requests.
 TENANTS = [
-    ("tk_live_acme_9f2b", "Acme Corp", 50_000),
-    ("tk_live_globex_4d7a", "Globex", 50_000),
+    ("tk_live_acme_9f2b", "Acme Corp", settings.seed_token_limit),
+    ("tk_live_globex_4d7a", "Globex", settings.seed_token_limit),
     ("tk_live_tiny_1c3e", "Tiny Startup", 2_000),
 ]
 

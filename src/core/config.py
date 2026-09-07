@@ -40,6 +40,7 @@ class Settings:
     upstream_timeout_ms: int
     log_level: str
     mcp_gateway_url: str
+    seed_token_limit: int
 
 
 def load_settings() -> Settings:
@@ -61,6 +62,11 @@ def load_settings() -> Settings:
         # overrides this with the service name. The default suits running the
         # two services directly on one machine.
         mcp_gateway_url=_get("MCP_GATEWAY_URL", "http://127.0.0.1:8000"),
+        # Public deployments run with small budgets. A demo URL with a
+        # 50,000 token per minute allowance is an invitation to spend someone
+        # else's money, and a smaller limit also makes the rate limiter visible
+        # in a few clicks rather than a few hundred.
+        seed_token_limit=_get_int("SEED_TOKEN_LIMIT", 50_000),
     )
 
 
