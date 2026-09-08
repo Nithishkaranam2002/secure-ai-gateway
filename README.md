@@ -1,5 +1,7 @@
 # Secure AI Gateway
 
+[![tests](https://github.com/Nithishkaranam2002/secure-ai-gateway/actions/workflows/tests.yml/badge.svg)](https://github.com/Nithishkaranam2002/secure-ai-gateway/actions/workflows/tests.yml)
+
 A security layer between AI agents and the systems they touch.
 
 Agents can be talked into almost anything by the text they read. This project
